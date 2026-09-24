@@ -966,22 +966,75 @@ function ConvertFrom-UnixMicros {
 #  9)  Check 1: installed programs (registry) -> desktop wallets
 # =====================================================================
 
+function Get-ProfileUserName {
+    <# Maps a user SID to the profile folder name via the HKLM ProfileList key (best effort). #>
+    param([string]$Sid)
+    try {
+        $pl = Get-ItemProperty -Path ("HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\" + $Sid) -ErrorAction Stop
+        $ip = [string](Get-Prop $pl 'ProfileImagePath' '')
+        if ($ip) { return (Split-Path -Leaf $ip) }
+    } catch { }
+    return $Sid
+}
+
+function Get-UninstallScanTargets {
+    <# Builds the list of Uninstall registry keys to scan.
+       - HKLM covers machine-wide installs (64-bit and 32-bit views).
+       - HKCU covers the currently logged-on user (interactive run).
+       - When the process runs as SYSTEM (scheduled task), HKCU points at the
+       system profile which has NO Uninstall key at all. Instead of failing, we
+       enumerate every real user hive under HKEY_USERS and scan each one, so
+       per-user installed wallets are still found for ALL users of the machine.
+       Keys that simply do not exist are skipped silently (no error entry). #>
+    $targets = New-Object System.Collections.ArrayList
+
+    foreach ($machine in @(
+            'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall',
+            'HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall'
+        )) {
+        if (Test-Path -LiteralPath $machine) { [void]$targets.Add([PSCustomObject]@{ Path = ($machine + '\*'); User = '' }) }
+    }
+
+    $cuKey  = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall'
+    $cuUser = [string]$env:USERNAME
+    if ([string]::IsNullOrWhiteSpace($cuUser)) { $cuUser = [string][System.Environment]::UserName }
+
+    if (Test-Path -LiteralPath $cuKey) {
+        [void]$targets.Add([PSCustomObject]@{ Path = ($cuKey + '\*'); User = $cuUser })
+    } else {
+        Write-Log 'HKCU Uninstall key not present (typical when running as SYSTEM); enumerating per-user hives under HKEY_USERS instead.' 'DEBUG'
+        try {
+            $hives = @(Get-ChildItem -LiteralPath 'Registry::HKEY_USERS' -ErrorAction Stop |
+                Where-Object { $_.PSChildName -match '^S-1-5-21-\d+-\d+-\d+-\d+$' })
+            foreach ($h in $hives) {
+                $sid = [string]$h.PSChildName
+                $u   = Get-ProfileUserName -Sid $sid
+                foreach ($sub in @(
+                        'Software\Microsoft\Windows\CurrentVersion\Uninstall',
+                        'Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall'
+                    )) {
+                    $k = "Registry::HKEY_USERS\$sid\$sub"
+                    if (Test-Path -LiteralPath $k) { [void]$targets.Add([PSCustomObject]@{ Path = ($k + '\*'); User = $u }) }
+                }
+            }
+        } catch {
+            Write-Log "Could not enumerate HKEY_USERS: $($_.Exception.Message)" 'WARN'
+        }
+    }
+    return @($targets)
+}
+
 function Invoke-InstalledProgramScan {
     Write-Log 'Scanning installed programs (registry)...'
 
     $keywords = @(Get-Prop $Script:Wallets 'desktop_wallets' @())
     if ($keywords.Count -eq 0) { Write-Log 'desktop_wallets list is empty.' 'WARN'; return }
 
-    $paths = @(
-        'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*',
-        'HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*',
-        'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*'
-    )
-
     $scanned = 0
-    foreach ($p in $paths) {
+    foreach ($t in @(Get-UninstallScanTargets)) {
+        $p = $t.Path
         try { $items = @(Get-ItemProperty -Path $p -ErrorAction Stop) }
-        catch { Add-Error "Could not read registry path '$p': $($_.Exception.Message)"; continue }
+        catch { Write-Log "Could not read registry path '$p': $($_.Exception.Message)" 'WARN'; continue }
 
         foreach ($it in $items) {
             $scanned++
@@ -1005,12 +1058,13 @@ function Invoke-InstalledProgramScan {
             $msg += "📦 Version: $(ConvertTo-HtmlSafe (Limit-Text $ver 40))"
             $msg += "📅 Install date: $(ConvertTo-HtmlSafe (Limit-Text $date 30))"
             if ($loc) { $msg += "📁 Path: <code>$(ConvertTo-HtmlSafe (Limit-Text $loc 160))</code>" }
-            if ($pub) { $msg += "🏢 Publisher: $(ConvertTo-HtmlSafe (Limit-Text $pub 80))" }
+            if ($pub) { $msg += "🏢 Publisher: <code>$(ConvertTo-HtmlSafe (Limit-Text $pub 80))</code>" }
+            if ($t.User) { $msg += "👤 User: <code>$(ConvertTo-HtmlSafe (Limit-Text $t.User 60))</code>" }
             $msg += "🔎 Keyword: <code>$(ConvertTo-HtmlSafe $kw)</code>"
             $msg += "🖥 Host: <code>$(ConvertTo-HtmlSafe $Script:HostLabel)</code>"
             $msg += "🕒 Discovered: $((Get-Date).ToString('yyyy-MM-dd HH:mm'))"
 
-            $key = "registry|$dn|$ver|$loc"
+            $key = "registry|$($t.User)|$dn|$ver|$loc"
             $isNew = Register-Finding -Type 'desktop' -Key $key -Label $dn -Message ($msg -join "`n")
             if ($isNew) { Add-DailyCounter -Type 'desktop' }
             Write-Log "Desktop wallet: $dn $ver" 'INFO'
